@@ -74,13 +74,33 @@ const settings = {
       },
     ],
   },
+  agentMode: "react",
 };
 
 const chatSession = {
   messages: [
     { id: "msg_user", role: "user", content: "查一下", createdAt: now, status: "complete" },
-    { id: "msg_tool", role: "tool-status", content: "search：完成", createdAt: now, status: "complete", toolCallId: "tool_1" },
-    { id: "msg_assistant", role: "assistant", content: "已完成。", createdAt: now, status: "complete" },
+    {
+      id: "msg_assistant",
+      role: "assistant",
+      content: "已完成。",
+      createdAt: now,
+      status: "complete",
+      reactTrace: {
+        collapsed: true,
+        waitingContinuation: false,
+        steps: [
+          {
+            id: "react_1",
+            round: 1,
+            thought: "需要查询。",
+            actions: [{ toolName: "search", argumentsSummary: "{\"query\":\"查一下\"}" }],
+            observations: [{ status: "success", summary: "{\"ok\":true}" }],
+            status: "complete",
+          },
+        ],
+      },
+    },
   ],
   toolCalls: [
     {
@@ -97,6 +117,7 @@ const chatSession = {
   ],
   isGenerating: false,
   generationId: "gen_done",
+  agentMode: "react",
 };
 
 const checks = [

@@ -7,6 +7,7 @@ import {
   SETTINGS_STORAGE_KEY,
   type PluginSettings,
 } from "../models/settings";
+import { normalizeAgentMode } from "../models/agent";
 
 const normalizeSettings = (raw: Partial<PluginSettings> | null | undefined): PluginSettings => {
   const fallback = defaultSettings();
@@ -21,6 +22,7 @@ const normalizeSettings = (raw: Partial<PluginSettings> | null | undefined): Plu
     llmProfiles,
     mcpServers,
     mcpToolCache: raw?.mcpToolCache || fallback.mcpToolCache,
+    agentMode: normalizeAgentMode(raw?.agentMode),
   };
 };
 

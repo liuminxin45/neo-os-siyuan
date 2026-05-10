@@ -1,5 +1,6 @@
 import type { LlmProfile } from "./llm";
 import type { McpServerConfig, McpTool } from "./mcp";
+import type { AgentMode } from "./agent";
 
 export interface PluginSettings {
   schemaVersion: number;
@@ -7,6 +8,7 @@ export interface PluginSettings {
   llmProfiles: LlmProfile[];
   mcpServers: McpServerConfig[];
   mcpToolCache?: Record<string, McpTool[]>;
+  agentMode?: AgentMode;
 }
 
 export const SETTINGS_STORAGE_KEY = "settings";
@@ -18,4 +20,5 @@ export const defaultSettings = (): PluginSettings => ({
   llmProfiles: [],
   mcpServers: [],
   mcpToolCache: {},
+  agentMode: "react",
 });

@@ -106,6 +106,54 @@
   background: var(--b3-list-hover);
 }
 
+.siyuan-addon-react {
+  border-top: 1px solid var(--b3-theme-surface-lighter);
+  margin-top: 8px;
+  padding-top: 6px;
+}
+
+.siyuan-addon-react__summary {
+  color: var(--b3-theme-primary);
+  cursor: pointer;
+  font-size: 12px;
+  user-select: none;
+}
+
+.siyuan-addon-react__steps {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.siyuan-addon-react__step {
+  background: var(--b3-theme-background);
+  border: 1px solid var(--b3-theme-surface-lighter);
+  border-radius: 6px;
+  padding: 7px;
+}
+
+.siyuan-addon-react__round {
+  color: var(--b3-theme-on-surface);
+  font-size: 11px;
+  margin-bottom: 4px;
+}
+
+.siyuan-addon-react__line {
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.siyuan-addon-message__pause {
+  border: 1px solid var(--b3-theme-error);
+  border-radius: 6px;
+  color: var(--b3-theme-error);
+  font-size: 12px;
+  margin-top: 8px;
+  padding: 6px 8px;
+}
+
 .siyuan-addon-composer {
   border-top: 1px solid var(--b3-theme-surface-lighter);
   padding: 10px;

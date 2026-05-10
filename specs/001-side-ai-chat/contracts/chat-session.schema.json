@@ -18,8 +18,57 @@
           "role": { "enum": ["user", "assistant", "tool-status"] },
           "content": { "type": "string" },
           "createdAt": { "type": "string" },
-          "status": { "enum": ["pending", "streaming", "complete", "error", "stopped"] },
-          "toolCallId": { "type": "string" }
+          "status": { "enum": ["pending", "streaming", "complete", "error", "stopped", "waiting-continue"] },
+          "toolCallId": { "type": "string" },
+          "pauseHint": { "type": "string" },
+          "reactTrace": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["steps", "collapsed", "waitingContinuation"],
+            "properties": {
+              "steps": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["id", "round", "thought", "actions", "observations", "status"],
+                  "properties": {
+                    "id": { "type": "string" },
+                    "round": { "type": "integer", "minimum": 1 },
+                    "thought": { "type": "string" },
+                    "actions": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": ["toolName", "argumentsSummary"],
+                        "properties": {
+                          "toolName": { "type": "string" },
+                          "argumentsSummary": { "type": "string" }
+                        }
+                      }
+                    },
+                    "observations": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": ["summary", "status"],
+                        "properties": {
+                          "summary": { "type": "string" },
+                          "status": { "enum": ["pending", "running", "success", "error", "stopped"] }
+                        }
+                      }
+                    },
+                    "status": { "enum": ["running", "complete", "error"] }
+                  }
+                }
+              },
+              "collapsed": { "type": "boolean" },
+              "waitingContinuation": { "type": "boolean" },
+              "pauseReason": { "type": "string" }
+            }
+          }
         }
       }
     },
@@ -44,6 +93,40 @@
       }
     },
     "isGenerating": { "type": "boolean" },
-    "generationId": { "type": "string" }
+    "generationId": { "type": "string" },
+    "agentMode": { "enum": ["react", "reflection", "plan-and-execute"] },
+    "continuation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["assistantMessageId", "toolResults", "completedRounds"],
+      "properties": {
+        "assistantMessageId": { "type": "string" },
+        "toolResults": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "serverId", "toolName", "llmName", "status", "startedAt"],
+            "properties": {
+              "id": { "type": "string", "minLength": 1 },
+              "serverId": { "type": "string", "minLength": 1 },
+              "toolName": { "type": "string", "minLength": 1 },
+              "llmName": { "type": "string", "minLength": 1 },
+              "status": { "enum": ["pending", "running", "success", "error", "stopped"] },
+              "startedAt": { "type": "string" },
+              "finishedAt": { "type": "string" },
+              "argumentsSummary": { "type": "string" },
+              "outputSummary": { "type": "string" },
+              "error": { "type": "string" }
+            }
+          }
+        },
+        "completedRounds": { "type": "integer", "minimum": 0 },
+        "reactHistory": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    }
   }
 }

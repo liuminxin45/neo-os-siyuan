@@ -1,6 +1,6 @@
 import type { ChatService } from "../services/chat-service";
 import type { SettingsStore } from "../services/settings-store";
-import type { ChatSession } from "../models/chat";
+import type { ChatMessage, ChatSession } from "../models/chat";
 import { createElement } from "./render";
 import { SettingsModal } from "./settings-modal";
 import type { McpService } from "../services/mcp-service";
@@ -74,15 +74,21 @@ export class ChatDock {
       copy.addEventListener("click", (event) => {
         event.preventDefault();
         event.stopPropagation();
-        void this.copyText(message.content);
+        void this.copyText(this.copyableMessageText(message));
       });
       messageActions.append(copy);
       meta.append(messageActions);
       const content = createElement("div", "siyuan-addon-message__content", message.content);
       item.append(meta, content);
+      const trace = this.renderReActTrace(message);
+      if (trace) item.append(trace);
+      if (message.pauseHint) {
+        item.append(createElement("div", "siyuan-addon-message__pause", message.pauseHint));
+      }
       messages.append(item);
     });
 
+    const canContinue = Boolean(session.continuation && !session.isGenerating && !this.draft.trim());
     const form = createElement("div", "siyuan-addon-composer");
     const textarea = document.createElement("textarea");
     textarea.className = "b3-text-field siyuan-addon-composer__input";
@@ -95,6 +101,10 @@ export class ChatDock {
     textarea.addEventListener("keydown", (event) => {
       if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
         event.preventDefault();
+        if (canContinue) {
+          void this.options.chatService.continue();
+          return;
+        }
         this.send();
       }
     });
@@ -104,11 +114,17 @@ export class ChatDock {
       this.draft = "";
       this.options.chatService.clear();
     });
-    const primary = createElement("button", session.isGenerating ? "b3-button b3-button--cancel" : "b3-button", session.isGenerating ? "停止" : "发送");
-    primary.dataset.siyuanAddonAction = session.isGenerating ? "stop" : "send";
+    const primaryClass = session.isGenerating || canContinue ? "b3-button b3-button--cancel" : "b3-button";
+    const primaryLabel = session.isGenerating ? "停止" : canContinue ? "继续" : "发送";
+    const primary = createElement("button", primaryClass, primaryLabel);
+    primary.dataset.siyuanAddonAction = session.isGenerating ? "stop" : canContinue ? "continue" : "send";
     primary.addEventListener("click", () => {
       if (session.isGenerating) {
         this.options.chatService.stop();
+        return;
+      }
+      if (canContinue) {
+        void this.options.chatService.continue();
         return;
       }
       this.send();
@@ -128,8 +144,62 @@ export class ChatDock {
 
   private metaText(role: string, status: string): string {
     const roleText = role === "user" ? "你" : role === "tool-status" ? "工具" : "AI";
-    const statusText = status === "streaming" ? "生成中" : status === "error" ? "失败" : status === "stopped" ? "已停止" : "";
+    const statusText =
+      status === "streaming"
+        ? "生成中"
+        : status === "error"
+          ? "失败"
+          : status === "stopped"
+            ? "已停止"
+            : status === "waiting-continue"
+              ? "等待继续"
+              : "";
     return [roleText, statusText].filter(Boolean).join(" · ");
+  }
+
+  private renderReActTrace(message: ChatMessage): HTMLElement | undefined {
+    const trace = message.reactTrace;
+    if (!trace?.steps.length) return undefined;
+    const details = document.createElement("details");
+    details.className = "siyuan-addon-react";
+    details.open = !trace.collapsed;
+    const summary = createElement("summary", "siyuan-addon-react__summary", `思考过程 · ${trace.steps.length} 轮`);
+    details.append(summary);
+    const list = createElement("div", "siyuan-addon-react__steps");
+    for (const step of trace.steps) {
+      const item = createElement("div", "siyuan-addon-react__step");
+      item.append(createElement("div", "siyuan-addon-react__round", `第 ${step.round} 轮`));
+      item.append(createElement("div", "siyuan-addon-react__line", `Thought：${step.thought}`));
+      for (const action of step.actions) {
+        item.append(createElement("div", "siyuan-addon-react__line", `Action：${action.toolName} ${action.argumentsSummary}`));
+      }
+      for (const observation of step.observations) {
+        item.append(createElement("div", "siyuan-addon-react__line", `Observation：${observation.summary}`));
+      }
+      list.append(item);
+    }
+    details.append(list);
+    return details;
+  }
+
+  private copyableMessageText(message: ChatMessage): string {
+    if (message.role !== "assistant" || !message.reactTrace?.steps.length) return message.content;
+    const lines = ["思考过程"];
+    for (const step of message.reactTrace.steps) {
+      lines.push(`第 ${step.round} 轮`);
+      lines.push(`Thought：${step.thought}`);
+      for (const action of step.actions) {
+        lines.push(`Action：${action.toolName} ${action.argumentsSummary}`);
+      }
+      for (const observation of step.observations) {
+        lines.push(`Observation：${observation.summary}`);
+      }
+      lines.push("");
+    }
+    lines.push("最终回答");
+    lines.push(message.content);
+    if (message.pauseHint) lines.push("", message.pauseHint);
+    return lines.join("\n").trim();
   }
 
   private async copyText(value: string): Promise<void> {
