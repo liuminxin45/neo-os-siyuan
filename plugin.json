@@ -1,0 +1,50 @@
+{
+  "name": "siyuan-addon",
+  "author": "leoiu",
+  "url": "https://github.com/leoiu/siyuan-addon",
+  "version": "0.1.0",
+  "minAppVersion": "3.5.3",
+  "backends": [
+    "windows",
+    "linux",
+    "darwin",
+    "ios",
+    "android",
+    "harmony",
+    "docker",
+    "all"
+  ],
+  "frontends": [
+    "desktop",
+    "mobile",
+    "browser-desktop",
+    "browser-mobile",
+    "desktop-window",
+    "all"
+  ],
+  "disabledInPublish": false,
+  "displayName": {
+    "default": "Siyuan Addon",
+    "zh_CN": "思源插件骨架"
+  },
+  "description": {
+    "default": "A minimal runnable Siyuan plugin skeleton",
+    "zh_CN": "一个可直接运行和继续开发的思源插件骨架"
+  },
+  "readme": {
+    "default": "README.md",
+    "zh_CN": "README_zh_CN.md"
+  },
+  "funding": {
+    "openCollective": "",
+    "patreon": "",
+    "github": "",
+    "custom": []
+  },
+  "keywords": [
+    "siyuan",
+    "plugin",
+    "skeleton",
+    "示例插件"
+  ]
+}
