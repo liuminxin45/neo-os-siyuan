@@ -8,26 +8,45 @@ import { safeErrorText } from "../utils/masks";
 import type { McpService } from "./mcp-service";
 import { AgentRuntime } from "./agent-runtime";
 import { DEFAULT_AGENT_MODE, REACT_PAUSE_MESSAGE, type AgentMode, type ReActStep } from "../models/agent";
+import { compareChatArchives, type SiyuanChatArchiveStore } from "./siyuan-chat-archive";
 
 export interface ChatServiceOptions {
   getActiveProfile: () => LlmProfile | undefined;
   getAgentMode?: () => AgentMode | undefined;
   getMaxMemoryTurns?: () => number | undefined;
   mcpService: McpService;
+  archiveStore?: SiyuanChatArchiveStore;
 }
 
 export interface ChatSendOptions {
   skill?: SkillIndexItem;
 }
 
-const emptySession = (): ChatSession => ({
+const createConversationId = (): string => `conv_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+
+const emptySession = (archives: ChatSession["archives"] = []): ChatSession => ({
+  conversationId: createConversationId(),
   messages: [],
   toolCalls: [],
   isGenerating: false,
   generationId: undefined,
   agentMode: DEFAULT_AGENT_MODE,
   continuation: undefined,
+  archives,
+  archiveStatus: "idle",
+  archiveError: undefined,
 });
+
+const mergeArchiveSummary = (
+  archives: ChatSession["archives"],
+  summary: ChatSession["archives"][number],
+): ChatSession["archives"] => {
+  const existingIndex = archives.findIndex((item) => item.conversationId === summary.conversationId);
+  if (existingIndex >= 0) {
+    return archives.map((item, index) => (index === existingIndex ? summary : item));
+  }
+  return [...archives, summary].sort(compareChatArchives);
+};
 
 const looksLikeMcpRequest = (prompt: string): boolean =>
   /\bmcp\b/i.test(prompt) || /工具|思源|笔记本|笔记|文档|数据库|块|标签|文件|搜索|遍历|读取|查询|当前工作区/.test(prompt);
@@ -51,6 +70,7 @@ export class ChatService {
   private listeners = new Set<ChatListener>();
   private abortController?: AbortController;
   private readonly agentRuntime = new AgentRuntime();
+  private archiveSavePromise: Promise<void> = Promise.resolve();
 
   constructor(private readonly options: ChatServiceOptions) {}
 
@@ -69,9 +89,11 @@ export class ChatService {
   }
 
   clear(): void {
+    const previous = this.snapshot();
     this.stop();
-    this.session = emptySession();
+    this.session = emptySession(this.session.archives);
     this.emit();
+    if (!previous.isGenerating && previous.messages.length > 0) void this.saveSnapshot(previous);
   }
 
   stop(): void {
@@ -140,6 +162,7 @@ export class ChatService {
       if (tools.length === 0 && looksLikeMcpRequest(prompt)) {
         this.appendAssistantChunk(assistantMessage.id, "当前没有可用的 MCP 工具，请先在设置中连接并发现 MCP 工具。", generationId);
         this.finishAssistant(assistantMessage.id, generationId);
+        await this.saveCurrentSession();
         return;
       }
       const result = await this.agentRuntime.run({
@@ -164,6 +187,7 @@ export class ChatService {
         this.appendAssistantChunk(assistantMessage.id, "工具调用已完成。", generationId);
       }
       this.finishAssistant(assistantMessage.id, generationId);
+      await this.saveCurrentSession();
     } catch (error) {
       if (this.abortController?.signal.aborted) {
         this.stop();
@@ -218,6 +242,7 @@ export class ChatService {
         return;
       }
       this.finishAssistant(continuation.assistantMessageId, generationId);
+      await this.saveCurrentSession();
     } catch (error) {
       if (this.abortController?.signal.aborted) {
         this.stop();
@@ -242,6 +267,99 @@ export class ChatService {
       callTool: (tool: McpTool, args: Record<string, unknown>) =>
         this.options.mcpService.callTool(tool, args, this.session.generationId || ""),
     };
+  }
+
+  async loadArchives(): Promise<void> {
+    if (!this.options.archiveStore) return;
+    this.session = { ...this.session, archiveStatus: "loading", archiveError: undefined };
+    this.emit();
+    try {
+      const archives = await this.options.archiveStore.listArchives();
+      let next = { ...this.session, archives, archiveStatus: "ready" as const, archiveError: undefined };
+      if (next.messages.length === 0 && archives.length > 0) {
+        const doc = await this.options.archiveStore.loadArchive(archives[0].conversationId);
+        next = {
+          ...next,
+          conversationId: doc.conversationId,
+          messages: doc.messages,
+          toolCalls: [],
+          continuation: undefined,
+          generationId: undefined,
+        };
+      }
+      this.session = next;
+      this.emit();
+    } catch (error) {
+      this.session = { ...this.session, archiveStatus: "error", archiveError: safeErrorText(error) };
+      this.emit();
+    }
+  }
+
+  async switchArchive(conversationId: string): Promise<void> {
+    if (!this.options.archiveStore || this.session.isGenerating || conversationId === this.session.conversationId) return;
+    await this.saveCurrentSession();
+    this.session = { ...this.session, archiveStatus: "loading", archiveError: undefined };
+    this.emit();
+    try {
+      const doc = await this.options.archiveStore.loadArchive(conversationId);
+      this.session = {
+        ...this.session,
+        conversationId: doc.conversationId,
+        messages: doc.messages,
+        toolCalls: [],
+        generationId: undefined,
+        continuation: undefined,
+        archiveStatus: "ready",
+        archiveError: undefined,
+      };
+      this.emit();
+    } catch (error) {
+      this.session = { ...this.session, archiveStatus: "error", archiveError: safeErrorText(error) };
+      this.emit();
+    }
+  }
+
+  async deleteArchive(conversationId: string): Promise<void> {
+    if (!this.options.archiveStore || this.session.isGenerating) return;
+    this.session = { ...this.session, archiveStatus: "loading", archiveError: undefined };
+    this.emit();
+    try {
+      await this.options.archiveStore.deleteArchive(conversationId);
+      const archives = this.session.archives.filter((item) => item.conversationId !== conversationId);
+      const isCurrent = this.session.conversationId === conversationId;
+      this.session = {
+        ...this.session,
+        ...(isCurrent ? emptySession(archives) : {}),
+        archives,
+        archiveStatus: "ready",
+        archiveError: undefined,
+      };
+      this.emit();
+    } catch (error) {
+      this.session = { ...this.session, archiveStatus: "error", archiveError: safeErrorText(error) };
+      this.emit();
+    }
+  }
+
+  async saveCurrentSession(): Promise<void> {
+    if (!this.options.archiveStore || this.session.messages.length === 0) return this.archiveSavePromise;
+    const snapshot = this.snapshot();
+    if (snapshot.isGenerating) return this.archiveSavePromise;
+    return this.saveSnapshot(snapshot);
+  }
+
+  private async saveSnapshot(snapshot: ChatSession): Promise<void> {
+    this.archiveSavePromise = this.archiveSavePromise.then(async () => {
+      const summary = await this.options.archiveStore?.saveArchive(snapshot.conversationId, snapshot.messages);
+      if (!summary) return;
+      const archives = mergeArchiveSummary(this.session.archives, summary);
+      this.session = { ...this.session, archives, archiveStatus: "ready", archiveError: undefined };
+      this.emit();
+    }).catch((error) => {
+      this.session = { ...this.session, archiveStatus: "error", archiveError: safeErrorText(error) };
+      this.emit();
+    });
+    return this.archiveSavePromise;
   }
 
   private formatPrompt(content: string, skill?: SkillIndexItem): string {
@@ -360,6 +478,7 @@ export class ChatService {
     if (this.session.generationId !== generationId) return;
     this.session = {
       ...this.session,
+      isGenerating: false,
       messages: this.session.messages.map((message) =>
         message.id === messageId
           ? {

@@ -7,12 +7,14 @@ import { renderMarkdown } from "./markdown";
 import { SettingsModal } from "./settings-modal";
 import type { McpService } from "../services/mcp-service";
 import type { SiyuanSkillIndexReader } from "../services/siyuan-skill-index";
+import type { SiyuanDocumentOpener } from "../services/siyuan-document-opener";
 
 interface ChatDockOptions {
   chatService: ChatService;
   settingsStore: SettingsStore;
   mcpService: McpService;
   skillIndexReader: SiyuanSkillIndexReader;
+  documentOpener: SiyuanDocumentOpener;
 }
 
 export class ChatDock {
@@ -69,16 +71,26 @@ export class ChatDock {
     const shell = createElement("div", "siyuan-addon-chat");
     const header = createElement("header", "siyuan-addon-chat__header");
     const title = createElement("div", "siyuan-addon-chat__title", "AI Chat");
+    const headerActions = createElement("div", "siyuan-addon-chat__header-actions");
+    headerActions.append(this.renderSessionPicker(session));
     const settings = createElement("button", "siyuan-addon-icon-button", "设置");
     settings.addEventListener("click", () => this.settingsModal.open());
-    header.append(title, settings);
+    headerActions.append(settings);
+    header.append(title, headerActions);
 
     const messages = createElement("div", "siyuan-addon-chat__messages");
     if (session.messages.length === 0) {
       const empty = createElement("div", "siyuan-addon-empty");
       const active = this.options.settingsStore.get().activeProfileId;
-      empty.textContent = active ? "输入问题开始聊天。" : "请先在设置中添加 LLM 配置。";
+      empty.textContent = session.archiveStatus === "loading"
+        ? "正在加载聊天存档..."
+        : active
+          ? "输入问题开始聊天。"
+          : "请先在设置中添加 LLM 配置。";
       messages.append(empty);
+    }
+    if (session.archiveStatus === "error" && session.archiveError) {
+      messages.append(createElement("div", "siyuan-addon-archive-error", session.archiveError));
     }
     session.messages.forEach((message) => {
       const item = createElement("article", `siyuan-addon-message siyuan-addon-message--${message.role}`);
@@ -95,8 +107,10 @@ export class ChatDock {
       messageActions.append(copy);
       meta.append(messageActions);
       const content = createElement("div", "siyuan-addon-message__content");
-      renderMarkdown(content, message.content);
+      renderMarkdown(content, message.content, { onOpenDocument: (target) => void this.options.documentOpener.open(target) });
       item.append(meta, content);
+      const references = this.renderReferences(message);
+      if (references) item.append(references);
       const trace = this.renderReActTrace(message);
       if (trace) item.append(trace);
       if (message.pauseHint) {
@@ -185,6 +199,44 @@ export class ChatDock {
     this.draft = "";
     this.selectedSkill = undefined;
     void this.options.chatService.send(value, { skill });
+  }
+
+  private renderSessionPicker(session: ChatSession): HTMLElement {
+    const wrapper = createElement("div", "siyuan-addon-session-picker");
+    const select = document.createElement("select");
+    select.className = "b3-select siyuan-addon-session-picker__select";
+    select.disabled = session.isGenerating || session.archiveStatus === "loading";
+    const currentArchived = session.archives.some((item) => item.conversationId === session.conversationId);
+    const newOption = document.createElement("option");
+    newOption.value = "__new__";
+    newOption.textContent = session.archiveStatus === "loading" ? "加载中..." : "新对话";
+    select.append(newOption);
+    for (const item of session.archives) {
+      const option = document.createElement("option");
+      option.value = item.conversationId;
+      option.textContent = `${item.title} · ${item.messageCount}`;
+      option.title = item.fileName;
+      select.append(option);
+    }
+    select.value = currentArchived ? session.conversationId : "__new__";
+    select.addEventListener("change", () => {
+      if (select.value === "__new__") {
+        this.options.chatService.clear();
+        return;
+      }
+      void this.options.chatService.switchArchive(select.value);
+    });
+    const remove = createElement("button", "siyuan-addon-icon-button siyuan-addon-session-picker__delete", "删除") as HTMLButtonElement;
+    remove.type = "button";
+    remove.disabled = session.isGenerating || !currentArchived;
+    remove.addEventListener("click", () => {
+      const active = session.archives.find((item) => item.conversationId === session.conversationId);
+      if (!active) return;
+      if (!window.confirm(`删除对话存档 ${active.fileName}？`)) return;
+      void this.options.chatService.deleteArchive(active.conversationId);
+    });
+    wrapper.append(select, remove);
+    return wrapper;
   }
 
   private renderSelectedSkill(): HTMLElement {
@@ -350,11 +402,36 @@ export class ChatDock {
     return details;
   }
 
+  private renderReferences(message: ChatMessage): HTMLElement | undefined {
+    if (!message.references?.length) return undefined;
+    const wrapper = createElement("div", "siyuan-addon-references");
+    wrapper.append(createElement("div", "siyuan-addon-references__title", "References"));
+    const list = createElement("ol", "siyuan-addon-references__list");
+    for (const reference of message.references) {
+      const item = createElement("li", "siyuan-addon-references__item");
+      const title = createElement("button", "siyuan-addon-references__name", reference.title) as HTMLButtonElement;
+      title.type = "button";
+      title.addEventListener("click", () => {
+        void this.options.documentOpener.open({ title: reference.title, path: reference.path });
+      });
+      const source = createElement("span", "siyuan-addon-references__source", reference.sourceLabel || "Reference");
+      const path = createElement("button", "siyuan-addon-references__path", reference.path) as HTMLButtonElement;
+      path.type = "button";
+      path.addEventListener("click", () => {
+        void this.options.documentOpener.open({ title: reference.title, path: reference.path });
+      });
+      item.append(title, source, path);
+      list.append(item);
+    }
+    wrapper.append(list);
+    return wrapper;
+  }
+
   private renderTraceLine(label: string, value: string): HTMLElement {
     const line = createElement("div", "siyuan-addon-react__line");
     line.append(createElement("div", "siyuan-addon-react__label", `${label}：`));
     const body = createElement("div", "siyuan-addon-react__body");
-    renderMarkdown(body, value);
+    renderMarkdown(body, value, { onOpenDocument: (target) => void this.options.documentOpener.open(target) });
     line.append(body);
     return line;
   }

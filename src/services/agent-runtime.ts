@@ -162,11 +162,18 @@ const readIntentSignature = (tool: McpTool, args: Record<string, unknown>): stri
 };
 
 const MUTATING_ACTIONS = new Set([
+  "append",
   "write",
   "replace",
   "rm",
+  "delete",
+  "edit",
   "mv",
   "create",
+  "insert",
+  "update",
+  "upsert",
+  "patch",
   "rename",
   "remove",
   "move",
@@ -182,8 +189,209 @@ const MUTATING_ACTIONS = new Set([
   "create_daily_note",
 ]);
 
-const isMutatingCall = (args: Record<string, unknown>): boolean =>
-  typeof args.action === "string" && MUTATING_ACTIONS.has(args.action);
+const MUTATING_TOOL_NAME_PATTERN =
+  /(?:^|[_-])(write|replace|delete|remove|rm|edit|move|mv|create|append|insert|update|upsert|patch|rename)(?:$|[_-])/i;
+
+interface MutationRecord {
+  index: number;
+  operation: string;
+  target: string;
+  tool: string;
+  result: string;
+}
+
+interface DocumentReferenceRecord {
+  title: string;
+  path: string;
+  id?: string;
+}
+
+const isMutatingCall = (args: Record<string, unknown>, toolName = ""): boolean => {
+  const action = typeof args.action === "string" ? args.action : "";
+  return MUTATING_ACTIONS.has(action) || MUTATING_TOOL_NAME_PATTERN.test(action) || MUTATING_TOOL_NAME_PATTERN.test(toolName);
+};
+
+const stringArg = (args: Record<string, unknown>, names: string[]): string => {
+  for (const name of names) {
+    const value = args[name];
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return "";
+};
+
+const mutationOperationLabel = (args: Record<string, unknown>, toolName: string): string => {
+  const action = typeof args.action === "string" ? args.action : "";
+  const normalized = action.toLowerCase();
+  if (/write|create/.test(normalized)) return "创建/写入文档";
+  if (/replace|edit|find_replace|patch/.test(normalized)) return "编辑文档";
+  if (/append|insert|update|upsert/.test(normalized)) return "追加/更新内容";
+  if (/^rm$|remove|delete/.test(normalized)) return "删除文档";
+  if (/^mv$|move/.test(normalized)) return "移动文档";
+  if (/rename/.test(normalized)) return "重命名文档";
+  if (normalized.startsWith("set_") || normalized === "set") return "更新设置/属性";
+  return action || toolName || "变更操作";
+};
+
+const mutationTargetLabel = (args: Record<string, unknown>): string => {
+  const source = stringArg(args, ["path", "from", "sourcePath", "src", "id", "blockId", "docId"]);
+  const target = stringArg(args, ["to", "targetPath", "dest", "destination", "newPath", "newId"]);
+  if (source && target) return `${source} -> ${target}`;
+  return source || target || "未返回明确目标";
+};
+
+const sanitizeLedgerCell = (value: string, maxLength = 140): string => {
+  const compact = value.replace(/\s+/g, " ").replace(/\|/g, "\\|").trim();
+  return compact.length > maxLength ? `${compact.slice(0, maxLength - 1)}...` : compact;
+};
+
+const stripHighlights = (value: string): string => value.replace(/<\/?mark>/g, "").replace(/<[^>]*>/g, "");
+
+const cleanDocTitle = (value: string): string =>
+  stripHighlights(value)
+    .replace(/\s+/g, " ")
+    .trim();
+
+const normalizeDocPath = (path: string, notebookName?: string): string => {
+  const normalized = path.trim().replace(/\\/g, "/");
+  if (!normalized) return "";
+  if (notebookName && normalized.startsWith(`/${notebookName}/`)) return normalized;
+  if (/^\/?(wiki|raw|runs|skills)\//i.test(normalized)) {
+    return notebookName ? `/${notebookName}${normalized.startsWith("/") ? normalized : `/${normalized}`}` : normalized;
+  }
+  return normalized;
+};
+
+const documentReferencesFromValue = (value: unknown): DocumentReferenceRecord[] => {
+  if (Array.isArray(value)) return value.flatMap(documentReferencesFromValue);
+  if (!value || typeof value !== "object") return [];
+  const item = value as Record<string, unknown>;
+  const notebookName = typeof item.notebookName === "string" ? item.notebookName : undefined;
+  const type = typeof item.type === "string" ? item.type : "";
+  const id =
+    typeof item.rootID === "string"
+      ? item.rootID
+      : typeof item.parentID === "string"
+        ? item.parentID
+        : typeof item.id === "string"
+          ? item.id
+          : undefined;
+  const rawPath =
+    typeof item.hPath === "string"
+      ? item.hPath
+      : typeof item.hpath === "string"
+        ? item.hpath
+        : typeof item.path === "string"
+          ? item.path
+          : "";
+  const path = normalizeDocPath(rawPath, notebookName);
+  const title = cleanDocTitle(
+    (typeof item.plainContent === "string" && item.plainContent) ||
+      (typeof item.content === "string" && item.content) ||
+      path.split("/").filter(Boolean).pop() ||
+      "",
+  );
+  const looksLikeDoc = /NodeDocument|NodeHeading|document|heading/i.test(type) || /^\/?LLM-Wiki\/(wiki|raw|runs|skills)\//i.test(path) || /^\/?(wiki|raw|runs|skills)\//i.test(path);
+  return looksLikeDoc && title && path ? [{ title, path, id }] : [];
+};
+
+const parseToolOutputJson = (summary: string): unknown | undefined => {
+  try {
+    const parsed = JSON.parse(summary) as unknown;
+    if (typeof parsed === "object" && parsed !== null && "content" in parsed) {
+      const content = (parsed as { content?: unknown }).content;
+      if (Array.isArray(content)) {
+        const text = content
+          .map((item) => (typeof item === "object" && item !== null ? (item as { text?: unknown }).text : undefined))
+          .filter((item): item is string => typeof item === "string")
+          .join("\n");
+        if (text) return parseToolOutputJson(text) ?? parsed;
+      }
+    }
+    return parsed;
+  } catch {
+    const candidate = summary.match(/\{[\s\S]*\}/)?.[0] || summary.match(/\[[\s\S]*\]/)?.[0];
+    if (candidate && candidate !== summary) return parseToolOutputJson(candidate);
+    return undefined;
+  }
+};
+
+const dedupeDocumentReferences = (references: DocumentReferenceRecord[]): DocumentReferenceRecord[] => {
+  const seen = new Set<string>();
+  const result: DocumentReferenceRecord[] = [];
+  for (const reference of references) {
+    const key = reference.id || `${reference.title}|${reference.path}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(reference);
+  }
+  return result;
+};
+
+const documentReferencesFromResults = (toolResults: McpToolCall[]): DocumentReferenceRecord[] =>
+  dedupeDocumentReferences(
+    toolResults
+      .filter((result) => result.status === "success" && result.outputSummary)
+      .flatMap((result) => documentReferencesFromValue(parseToolOutputJson(result.outputSummary || "")))
+      .slice(0, 20),
+  );
+
+const linkedTitle = (reference: DocumentReferenceRecord): string =>
+  reference.id
+    ? `[${reference.title}](siyuan-doc://${reference.id})`
+    : `[${reference.title}](${reference.path})`;
+
+const bindDocumentLinks = (content: string, toolResults: McpToolCall[]): string => {
+  const references = documentReferencesFromResults(toolResults);
+  if (references.length === 0) return content;
+  let next = content;
+  for (const reference of references) {
+    const escapedTitle = reference.title.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const alreadyLinked = new RegExp(`\\[[^\\]]*${escapedTitle}[^\\]]*]\\([^)]*\\)`).test(next);
+    if (!alreadyLinked) {
+      next = next.replace(new RegExp(`\\*\\*${escapedTitle}\\*\\*`, "g"), `**${linkedTitle(reference)}**`);
+      next = next.replace(new RegExp(`(?<!\\[)${escapedTitle}(?![\\]\\)])`, "g"), linkedTitle(reference));
+    }
+    const pathLine = new RegExp(`路径：\`?${reference.path.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\`?`, "g");
+    next = next.replace(pathLine, `路径：${linkedTitle(reference)}`);
+  }
+  return next;
+};
+
+const mutationRecordsFromResults = (toolResults: McpToolCall[]): MutationRecord[] =>
+  toolResults
+    .map((result, index) => {
+      const args = parseArgumentSummary(result.argumentsSummary || "{}");
+      if (result.status !== "success" || !isMutatingCall(args, result.llmName || result.toolName)) return undefined;
+      return {
+        index: index + 1,
+        operation: sanitizeLedgerCell(mutationOperationLabel(args, result.llmName || result.toolName), 48),
+        target: sanitizeLedgerCell(mutationTargetLabel(args), 96),
+        tool: sanitizeLedgerCell(result.llmName || result.toolName, 64),
+        result: sanitizeLedgerCell(result.outputSummary || "工具返回成功", 160),
+      };
+    })
+    .filter((record): record is MutationRecord => Boolean(record));
+
+const formatMutationLedger = (toolResults: McpToolCall[]): string => {
+  const records = mutationRecordsFromResults(toolResults);
+  if (records.length === 0) return "";
+  return [
+    "## 实际变更清单",
+    "",
+    "| # | 操作 | 目标 | 工具 | 结果 |",
+    "|---:|---|---|---|---|",
+    ...records.map((record, index) =>
+      `| ${index + 1} | ${record.operation} | ${record.target} | ${record.tool} | ${record.result} |`,
+    ),
+  ].join("\n");
+};
+
+const finalizeAgentContent = (content: string, toolResults: McpToolCall[]): string => {
+  const trimmed = bindDocumentLinks(content.trim(), toolResults);
+  const ledger = formatMutationLedger(toolResults);
+  if (!ledger) return trimmed;
+  return [trimmed || "已完成。", ledger].join("\n\n");
+};
 
 const writeBodyFromArgs = (args: Record<string, unknown>): string =>
   [args.markdown, args.content, args.body, args.text, args.new]
@@ -200,12 +408,14 @@ const requiresSuccessfulMutation = (goal: string): boolean =>
   isSelectedSkillGoal(goal) && hasWorkspaceMutationIntent(goal);
 
 const hasSuccessfulMutation = (toolResults: McpToolCall[]): boolean =>
-  toolResults.some((result) => result.status === "success" && isMutatingCall(parseArgumentSummary(result.argumentsSummary || "{}")));
+  toolResults.some((result) =>
+    result.status === "success" && isMutatingCall(parseArgumentSummary(result.argumentsSummary || "{}"), result.llmName || result.toolName),
+  );
 
 const stepHasSuccessfulMutation = (step: ReActStep): boolean =>
   step.actions.some((action) => {
     const args = parseArgumentSummary(action.argumentsSummary);
-    return isMutatingCall(args) && step.observations.some((observation) => observation.status === "success");
+    return isMutatingCall(args, action.toolName) && step.observations.some((observation) => observation.status === "success");
   });
 
 const requiredGoalMarkers = (goal: string): string[] => {
@@ -535,9 +745,10 @@ export class AgentRuntime {
           });
           continue;
         }
+        const content = finalizeAgentContent(latest.content, toolResults);
         handlers.onStep({ ...step, status: "complete" });
-        handlers.onText(latest.content);
-        return { status: "final", content: latest.content, toolResults, completedRounds, reactHistory };
+        handlers.onText(content);
+        return { status: "final", content, toolResults, completedRounds, reactHistory };
       }
 
       for (const request of latest.toolRequests) {
@@ -580,7 +791,7 @@ export class AgentRuntime {
             : syntheticToolError(tool, effectiveArguments, preflightError)
           : await handlers.callTool(tool, effectiveArguments);
         const finalResult = { ...result, id: pending.id };
-        if (finalResult.status === "success" && isMutatingCall(effectiveArguments)) {
+        if (finalResult.status === "success" && isMutatingCall(effectiveArguments, tool.llmName || tool.name)) {
           workspaceVersion += 1;
         }
         rememberToolCallResult(tool, effectiveArguments, finalResult, exactToolCallRecords, workspaceVersion);
@@ -607,28 +818,34 @@ export class AgentRuntime {
         const guardReason =
           step.observations.find((observation) => observation.summary.startsWith(REPEAT_GUARD_PREFIX))?.summary ||
           "检测到重复工具调用。";
-        const content = await finalAnswerFromHistory(input.profile, runtimeMessages, input.signal, guardReason);
+        const content = finalizeAgentContent(await finalAnswerFromHistory(input.profile, runtimeMessages, input.signal, guardReason), toolResults);
         handlers.onText(content);
         return { status: "final", content, toolResults, completedRounds, reactHistory };
       }
 
       if (requiresSuccessfulMutation(userGoal) && stepHasSuccessfulMutation(step)) {
-        const content = await finalAnswerFromHistory(
-          input.profile,
-          runtimeMessages,
-          input.signal,
-          "已经观察到成功的 MCP 写入类调用。现在必须停止继续写入或查询，只基于写入结果给用户确认保存位置和保存内容摘要。",
+        const content = finalizeAgentContent(
+          await finalAnswerFromHistory(
+            input.profile,
+            runtimeMessages,
+            input.signal,
+            "已经观察到成功的 MCP 写入类调用。现在必须停止继续写入或查询，只基于写入结果给用户确认保存位置和保存内容摘要。插件会在最终回答末尾自动追加完整的实际变更清单，因此正文不要遗漏或编造变更。",
+          ),
+          toolResults,
         );
         handlers.onText(content);
         return { status: "final", content, toolResults, completedRounds, reactHistory };
       }
 
       if (shouldFinalizeAfterRead(step, userGoal, toolResults)) {
-        const content = await finalAnswerFromHistory(
-          input.profile,
-          runtimeMessages,
-          input.signal,
-          "已经成功读取到用户要求查看的文档内容。现在应基于已读内容直接回答，不要继续调用工具。",
+        const content = finalizeAgentContent(
+          await finalAnswerFromHistory(
+            input.profile,
+            runtimeMessages,
+            input.signal,
+            "已经成功读取到用户要求查看的文档内容。现在应基于已读内容直接回答，不要继续调用工具。",
+          ),
+          toolResults,
         );
         handlers.onText(content);
         return { status: "final", content, toolResults, completedRounds, reactHistory };
