@@ -1,0 +1,8 @@
+{
+  "script": "ps",
+  "ai": "codex",
+  "ai_skills": false,
+  "initialized_manually": true,
+  "source": "github/spec-kit",
+  "template_version": "0.8.7"
+}
