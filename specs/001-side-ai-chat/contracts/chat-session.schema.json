@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://leoiu.local/siyuan-addon/chat-session.schema.json",
+  "title": "ChatSession",
+  "description": "In-memory only. This schema documents runtime state, not persisted plugin data.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["messages", "toolCalls", "isGenerating"],
+  "properties": {
+    "messages": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "role", "content", "createdAt", "status"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "role": { "enum": ["user", "assistant", "tool-status"] },
+          "content": { "type": "string" },
+          "createdAt": { "type": "string" },
+          "status": { "enum": ["pending", "streaming", "complete", "error", "stopped"] },
+          "toolCallId": { "type": "string" }
+        }
+      }
+    },
+    "toolCalls": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "serverId", "toolName", "llmName", "status", "startedAt"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "serverId": { "type": "string", "minLength": 1 },
+          "toolName": { "type": "string", "minLength": 1 },
+          "llmName": { "type": "string", "minLength": 1 },
+          "status": { "enum": ["pending", "running", "success", "error", "stopped"] },
+          "startedAt": { "type": "string" },
+          "finishedAt": { "type": "string" },
+          "argumentsSummary": { "type": "string" },
+          "outputSummary": { "type": "string" },
+          "error": { "type": "string" }
+        }
+      }
+    },
+    "isGenerating": { "type": "boolean" },
+    "generationId": { "type": "string" }
+  }
+}

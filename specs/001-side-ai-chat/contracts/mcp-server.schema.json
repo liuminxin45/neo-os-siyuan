@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://leoiu.local/siyuan-addon/mcp-server.schema.json",
+  "title": "MCPServer",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "name", "transport", "enabled", "status", "updatedAt"],
+  "properties": {
+    "id": { "type": "string", "minLength": 1 },
+    "name": { "type": "string", "minLength": 1 },
+    "transport": { "enum": ["stdio", "sse", "streamable-http"] },
+    "enabled": { "type": "boolean" },
+    "command": { "type": "string" },
+    "args": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "env": {
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    },
+    "url": { "type": "string" },
+    "status": { "enum": ["idle", "validating", "ready", "error"] },
+    "lastError": { "type": "string" },
+    "updatedAt": { "type": "string" }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "transport": { "const": "stdio" } },
+        "required": ["transport"]
+      },
+      "then": { "required": ["command"] }
+    },
+    {
+      "if": {
+        "properties": { "transport": { "enum": ["sse", "streamable-http"] } },
+        "required": ["transport"]
+      },
+      "then": { "required": ["url"] }
+    }
+  ]
+}

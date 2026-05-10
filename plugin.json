@@ -24,12 +24,12 @@
   ],
   "disabledInPublish": false,
   "displayName": {
-    "default": "Siyuan Addon",
-    "zh_CN": "思源插件骨架"
+    "default": "Siyuan AI Chat",
+    "zh_CN": "思源 AI 聊天"
   },
   "description": {
-    "default": "A minimal runnable Siyuan plugin skeleton",
-    "zh_CN": "一个可直接运行和继续开发的思源插件骨架"
+    "default": "A personal side-panel AI chat with LLM profiles and trusted MCP tools.",
+    "zh_CN": "个人使用的侧边 AI 聊天插件，支持 LLM 配置和可信 MCP 工具。"
   },
   "readme": {
     "default": "README.md",
@@ -44,7 +44,7 @@
   "keywords": [
     "siyuan",
     "plugin",
-    "skeleton",
-    "示例插件"
+    "ai",
+    "mcp"
   ]
 }
