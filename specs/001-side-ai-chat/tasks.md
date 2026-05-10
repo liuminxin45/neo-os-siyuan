@@ -124,6 +124,15 @@
 - [x] T058 Update `README.md` and `README_zh_CN.md` with first-version behavior, configuration notes, session-only history, and MCP auto-use warning.
 - [x] T059 Review `git status --short` and keep changes scoped to `001-side-ai-chat`.
 
+## Phase 7: Provider Expansion
+
+**Purpose**: Add the two SpecKit-requested provider paths from the Neo-OS reference implementation.
+
+- [x] T064 [US2] Extend LLM profile model and JSON contract for `kimi-coding-plan`.
+- [x] T065 [US2] Add Kimi CodingPlan settings preset with fixed `https://api.kimi.com/coding` endpoint and default `k2p5` model.
+- [x] T067 [US1] Implement Kimi CodingPlan Anthropic Messages request and streaming parser in `src/adapters/llm-chat-completions.ts`.
+- [x] T070 [US2] Update README and quickstart validation for Kimi CodingPlan.
+
 ## Dependencies & Execution Order
 
 - Phase 1 must complete before Phase 2.

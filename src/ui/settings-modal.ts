@@ -55,9 +55,13 @@ export class SettingsModal {
       const info = createElement(
         "div",
         "siyuan-addon-list__info",
-        `${profile.name} · ${profile.provider === "deepseek" ? "DeepSeek" : "OpenAI Compatible"} · ${profile.model}`,
+        `${profile.name} · ${this.providerLabel(profile.provider)} · ${profile.model}`,
       );
-      const masked = createElement("div", "siyuan-addon-list__meta", `API Key: ${maskSecret(profile.apiKey)}`);
+      const masked = createElement(
+        "div",
+        "siyuan-addon-list__meta",
+        `API Key: ${maskSecret(profile.apiKey)}`,
+      );
       info.append(masked);
       const active = createElement("button", "b3-button b3-button--outline", profile.id === settings.activeProfileId ? "当前" : "设为当前");
       active.addEventListener("click", async () => {
@@ -82,8 +86,10 @@ export class SettingsModal {
     addDeepSeek.addEventListener("click", () => this.renderLlmForm(createEmptyLlmDraft("deepseek")));
     const addOpenAi = createElement("button", "b3-button b3-button--outline", "新增 OpenAI Compatible");
     addOpenAi.addEventListener("click", () => this.renderLlmForm(createEmptyLlmDraft("openai-compatible")));
+    const addKimi = createElement("button", "b3-button b3-button--outline", "新增 Kimi CodingPlan");
+    addKimi.addEventListener("click", () => this.renderLlmForm(createEmptyLlmDraft("kimi-coding-plan")));
     const actions = createElement("div", "siyuan-addon-actions");
-    actions.append(addDeepSeek, addOpenAi);
+    actions.append(addDeepSeek, addOpenAi, addKimi);
     section.append(list, actions);
     return section;
   }
@@ -98,11 +104,17 @@ export class SettingsModal {
     provider.disabled = true;
     const name = this.input("名称", draft.name);
     const baseUrl = this.input("Base URL", draft.baseUrl || "");
-    const apiKey = this.input("API Key", draft.apiKey, "password");
+    const apiKey = this.input("API Key", draft.apiKey || "", "password");
     const model = this.input("Model", draft.model);
     section.append(provider.parentElement!, name.parentElement!);
     if (draft.provider === "openai-compatible") section.append(baseUrl.parentElement!);
-    section.append(apiKey.parentElement!, model.parentElement!);
+    if (draft.provider === "kimi-coding-plan") {
+      const fixedUrl = createElement("div", "siyuan-addon-list__meta", `固定端点：${draft.baseUrl || "https://api.kimi.com/coding"}`);
+      section.append(fixedUrl, apiKey.parentElement!);
+    } else {
+      section.append(apiKey.parentElement!);
+    }
+    section.append(model.parentElement!);
     const errors = createElement("div", "siyuan-addon-form-errors");
     const save = createElement("button", "b3-button", "保存");
     save.addEventListener("click", async () => {
@@ -244,6 +256,12 @@ export class SettingsModal {
     this.options.onSettingsChanged();
     this.render();
     showMessage(result.server.status === "ready" ? `发现 ${result.tools.length} 个工具` : "工具发现失败", 3000, result.server.status === "ready" ? "info" : "error");
+  }
+
+  private providerLabel(provider: LlmProfile["provider"]): string {
+    if (provider === "deepseek") return "DeepSeek";
+    if (provider === "kimi-coding-plan") return "Kimi CodingPlan";
+    return "OpenAI Compatible";
   }
 
   private input(labelText: string, value: string, type = "text"): HTMLInputElement {

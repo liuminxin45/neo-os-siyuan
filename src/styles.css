@@ -67,8 +67,12 @@
 }
 
 .siyuan-addon-message__meta {
+  align-items: center;
   color: var(--b3-theme-on-surface);
+  display: flex;
   font-size: 11px;
+  gap: 8px;
+  justify-content: space-between;
   margin-bottom: 4px;
 }
 
@@ -77,6 +81,29 @@
   line-height: 1.55;
   white-space: pre-wrap;
   word-break: break-word;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.siyuan-addon-message__actions {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 4px;
+}
+
+.siyuan-addon-message__button {
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  color: var(--b3-theme-primary);
+  cursor: pointer;
+  font-size: 11px;
+  line-height: 1.4;
+  padding: 1px 4px;
+}
+
+.siyuan-addon-message__button:hover {
+  background: var(--b3-list-hover);
 }
 
 .siyuan-addon-composer {

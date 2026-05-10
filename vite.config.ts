@@ -15,7 +15,7 @@ export default defineConfig({
         id === "siyuan" ||
         id === "zod" ||
         id.startsWith("node:") ||
-        ["child_process", "fs", "path", "stream", "process"].includes(id),
+        ["child_process", "crypto", "fs", "http", "https", "net", "path", "stream", "process", "url"].includes(id),
       output: {
         exports: "named",
         assetFileNames: (assetInfo) => {

@@ -8,6 +8,7 @@ A personal right-side AI chat plugin for Siyuan.
 - Multiple LLM profiles.
 - OpenAI-compatible provider with custom Base URL.
 - Simplified DeepSeek provider with API Key and model.
+- Kimi CodingPlan with the fixed `https://api.kimi.com/coding` endpoint.
 - MCP server configuration for stdio, SSE URL, and Streamable HTTP URL.
 - MCP tool discovery and trusted automatic tool calls.
 - Tool name and status shown in chat.
