@@ -104,14 +104,16 @@ export class ChatDock {
       this.draft = "";
       this.options.chatService.clear();
     });
-    const send = createElement("button", "b3-button", session.isGenerating ? "生成中" : "发送");
-    send.disabled = session.isGenerating;
-    send.addEventListener("click", () => this.send());
-    const stop = createElement("button", "b3-button b3-button--cancel", "停止");
-    stop.dataset.siyuanAddonAction = "stop";
-    stop.disabled = !session.isGenerating;
-    stop.addEventListener("click", () => this.options.chatService.stop());
-    actions.append(clear, stop, send);
+    const primary = createElement("button", session.isGenerating ? "b3-button b3-button--cancel" : "b3-button", session.isGenerating ? "停止" : "发送");
+    primary.dataset.siyuanAddonAction = session.isGenerating ? "stop" : "send";
+    primary.addEventListener("click", () => {
+      if (session.isGenerating) {
+        this.options.chatService.stop();
+        return;
+      }
+      this.send();
+    });
+    actions.append(clear, primary);
     form.append(textarea, actions);
     shell.append(header, messages, form);
     this.root.append(shell);

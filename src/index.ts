@@ -34,7 +34,7 @@ export default class SiyuanAddonPlugin extends Plugin {
       mcpService: this.mcpService,
     });
     this.registerDock();
-    void this.settingsStore.load();
+    void this.initializeSettingsAndMcp();
   }
 
   onunload(): void {
@@ -66,6 +66,31 @@ export default class SiyuanAddonPlugin extends Plugin {
     });
     this.dedupeDockLayout();
     window.setTimeout(() => this.dedupeDockLayout(), 0);
+  }
+
+  private async initializeSettingsAndMcp(): Promise<void> {
+    if (!this.settingsStore || !this.mcpService) return;
+    const settings = await this.settingsStore.load();
+    let nextServers = settings.mcpServers;
+    let nextToolCache = { ...(settings.mcpToolCache || {}) };
+    let changed = false;
+
+    for (const server of settings.mcpServers) {
+      if (!server.enabled) continue;
+      const result = await this.mcpService.discover(server);
+      nextServers = nextServers.map((item) => (item.id === server.id ? result.server : item));
+      nextToolCache = { ...nextToolCache, [server.id]: result.tools };
+      changed = true;
+    }
+
+    if (changed) {
+      await this.settingsStore.save({
+        ...settings,
+        mcpServers: nextServers,
+        mcpToolCache: nextToolCache,
+      });
+    }
+    this.chatService?.refresh();
   }
 
   private dedupeDockLayout(): void {
