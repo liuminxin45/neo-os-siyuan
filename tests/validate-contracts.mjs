@@ -75,6 +75,7 @@ const settings = {
     ],
   },
   agentMode: "react",
+  maxMemoryTurns: 10,
 };
 
 const chatSession = {

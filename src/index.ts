@@ -4,6 +4,7 @@ import { ChatDock } from "./ui/chat-dock";
 import { SettingsStore } from "./services/settings-store";
 import { ChatService } from "./services/chat-service";
 import { McpService } from "./services/mcp-service";
+import { SiyuanSkillIndexReader } from "./services/siyuan-skill-index";
 import { getActiveProfile } from "./services/llm-profile-service";
 
 const DOCK_TYPE = "siyuan-addon-ai-chat";
@@ -12,6 +13,7 @@ const SIYUAN_DOCK_TYPE = "siyuan-addonsiyuan-addon-ai-chat";
 export default class SiyuanAddonPlugin extends Plugin {
   private settingsStore?: SettingsStore;
   private mcpService?: McpService;
+  private skillIndexReader?: SiyuanSkillIndexReader;
   private chatService?: ChatService;
   private chatDock?: ChatDock;
 
@@ -21,6 +23,7 @@ export default class SiyuanAddonPlugin extends Plugin {
 </symbol>`);
     this.settingsStore = new SettingsStore(this);
     this.mcpService = new McpService();
+    this.skillIndexReader = new SiyuanSkillIndexReader();
     this.chatService = new ChatService({
       mcpService: this.mcpService,
       getActiveProfile: () => {
@@ -28,11 +31,13 @@ export default class SiyuanAddonPlugin extends Plugin {
         return settings ? getActiveProfile(settings.llmProfiles, settings.activeProfileId) : undefined;
       },
       getAgentMode: () => this.settingsStore?.get().agentMode,
+      getMaxMemoryTurns: () => this.settingsStore?.get().maxMemoryTurns,
     });
     this.chatDock = new ChatDock({
       chatService: this.chatService,
       settingsStore: this.settingsStore,
       mcpService: this.mcpService,
+      skillIndexReader: this.skillIndexReader,
     });
     this.registerDock();
     void this.initializeSettingsAndMcp();

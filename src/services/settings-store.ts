@@ -2,12 +2,18 @@ import type { Plugin } from "siyuan";
 import type { LlmProfile } from "../models/llm";
 import type { McpServerConfig, McpTool } from "../models/mcp";
 import {
+  DEFAULT_MAX_MEMORY_TURNS,
+  MAX_MEMORY_TURN_OPTIONS,
   defaultSettings,
   SETTINGS_SCHEMA_VERSION,
   SETTINGS_STORAGE_KEY,
+  type MaxMemoryTurns,
   type PluginSettings,
 } from "../models/settings";
 import { normalizeAgentMode } from "../models/agent";
+
+const normalizeMaxMemoryTurns = (value: unknown): MaxMemoryTurns =>
+  MAX_MEMORY_TURN_OPTIONS.includes(value as MaxMemoryTurns) ? (value as MaxMemoryTurns) : DEFAULT_MAX_MEMORY_TURNS;
 
 const normalizeSettings = (raw: Partial<PluginSettings> | null | undefined): PluginSettings => {
   const fallback = defaultSettings();
@@ -23,6 +29,7 @@ const normalizeSettings = (raw: Partial<PluginSettings> | null | undefined): Plu
     mcpServers,
     mcpToolCache: raw?.mcpToolCache || fallback.mcpToolCache,
     agentMode: normalizeAgentMode(raw?.agentMode),
+    maxMemoryTurns: normalizeMaxMemoryTurns(raw?.maxMemoryTurns),
   };
 };
 
@@ -65,5 +72,9 @@ export class SettingsStore {
       ...this.settings,
       mcpToolCache: { ...(this.settings.mcpToolCache || {}), [serverId]: tools },
     });
+  }
+
+  async setMaxMemoryTurns(maxMemoryTurns: MaxMemoryTurns): Promise<PluginSettings> {
+    return this.save({ ...this.settings, maxMemoryTurns });
   }
 }

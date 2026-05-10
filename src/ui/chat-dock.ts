@@ -1,20 +1,32 @@
 import type { ChatService } from "../services/chat-service";
 import type { SettingsStore } from "../services/settings-store";
 import type { ChatMessage, ChatSession } from "../models/chat";
+import type { SkillIndexItem } from "../models/skill";
 import { createElement } from "./render";
+import { renderMarkdown } from "./markdown";
 import { SettingsModal } from "./settings-modal";
 import type { McpService } from "../services/mcp-service";
+import type { SiyuanSkillIndexReader } from "../services/siyuan-skill-index";
 
 interface ChatDockOptions {
   chatService: ChatService;
   settingsStore: SettingsStore;
   mcpService: McpService;
+  skillIndexReader: SiyuanSkillIndexReader;
 }
 
 export class ChatDock {
   private root?: HTMLElement;
   private draft = "";
+  private selectedSkill?: SkillIndexItem;
+  private skillItems: SkillIndexItem[] = [];
+  private skillLoadStatus: "idle" | "loading" | "ready" | "error" = "idle";
+  private skillLoadError = "";
+  private skillLoadPromise?: Promise<void>;
+  private activeSkillIndex = 0;
+  private focusComposerAfterRender = false;
   private unsubscribe?: () => void;
+  private readonly traceOpenState = new Map<string, boolean>();
   private settingsModal: SettingsModal;
   private readonly handleRootPointerDown = (event: PointerEvent): void => {
     const target = event.target instanceof HTMLElement ? event.target : undefined;
@@ -49,6 +61,10 @@ export class ChatDock {
 
   render(session: ChatSession): void {
     if (!this.root) return;
+    const messageIds = new Set(session.messages.map((message) => message.id));
+    for (const messageId of this.traceOpenState.keys()) {
+      if (!messageIds.has(messageId)) this.traceOpenState.delete(messageId);
+    }
     this.root.innerHTML = "";
     const shell = createElement("div", "siyuan-addon-chat");
     const header = createElement("header", "siyuan-addon-chat__header");
@@ -78,7 +94,8 @@ export class ChatDock {
       });
       messageActions.append(copy);
       meta.append(messageActions);
-      const content = createElement("div", "siyuan-addon-message__content", message.content);
+      const content = createElement("div", "siyuan-addon-message__content");
+      renderMarkdown(content, message.content);
       item.append(meta, content);
       const trace = this.renderReActTrace(message);
       if (trace) item.append(trace);
@@ -88,17 +105,34 @@ export class ChatDock {
       messages.append(item);
     });
 
-    const canContinue = Boolean(session.continuation && !session.isGenerating && !this.draft.trim());
+    const canContinue = Boolean(session.continuation && !session.isGenerating && !this.draft.trim() && !this.selectedSkill);
     const form = createElement("div", "siyuan-addon-composer");
+    if (this.selectedSkill) form.append(this.renderSelectedSkill());
     const textarea = document.createElement("textarea");
     textarea.className = "b3-text-field siyuan-addon-composer__input";
-    textarea.placeholder = "输入消息，Enter 发送，Shift+Enter 换行";
+    textarea.placeholder = this.selectedSkill
+      ? `描述你想用 ${this.selectedSkill.name} 完成的目标`
+      : "输入消息，/ 选择 skill，Enter 发送，Shift+Enter 换行";
     textarea.value = this.draft;
     textarea.disabled = session.isGenerating;
     textarea.addEventListener("input", () => {
+      const wasSlashActive = this.isSlashActive();
       this.draft = textarea.value;
+      if (this.isSlashActive()) {
+        this.activeSkillIndex = 0;
+        void this.ensureSkillsLoaded();
+        this.focusComposerAfterRender = true;
+        this.render(session);
+        return;
+      }
+      if (wasSlashActive) {
+        this.activeSkillIndex = 0;
+        this.focusComposerAfterRender = true;
+        this.render(session);
+      }
     });
     textarea.addEventListener("keydown", (event) => {
+      if (this.handleSkillPaletteKeydown(event, session)) return;
       if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
         event.preventDefault();
         if (canContinue) {
@@ -112,6 +146,7 @@ export class ChatDock {
     const clear = createElement("button", "b3-button b3-button--outline", "清空");
     clear.addEventListener("click", () => {
       this.draft = "";
+      this.selectedSkill = undefined;
       this.options.chatService.clear();
     });
     const primaryClass = session.isGenerating || canContinue ? "b3-button b3-button--cancel" : "b3-button";
@@ -130,16 +165,146 @@ export class ChatDock {
       this.send();
     });
     actions.append(clear, primary);
-    form.append(textarea, actions);
+    form.append(textarea);
+    const skillPalette = this.renderSkillPalette();
+    if (skillPalette) form.append(skillPalette);
+    form.append(actions);
     shell.append(header, messages, form);
     this.root.append(shell);
     messages.scrollTop = messages.scrollHeight;
+    if (this.focusComposerAfterRender && !session.isGenerating) {
+      textarea.focus();
+      textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+      this.focusComposerAfterRender = false;
+    }
   }
 
   private send(): void {
     const value = this.draft;
+    const skill = this.selectedSkill;
     this.draft = "";
-    void this.options.chatService.send(value);
+    this.selectedSkill = undefined;
+    void this.options.chatService.send(value, { skill });
+  }
+
+  private renderSelectedSkill(): HTMLElement {
+    const wrapper = createElement("div", "siyuan-addon-skill-chip");
+    wrapper.append(createElement("span", "", `使用 skill：${this.selectedSkill?.name || ""}`));
+    const clear = createElement("button", "siyuan-addon-message__button", "移除");
+    clear.type = "button";
+    clear.addEventListener("click", () => {
+      this.selectedSkill = undefined;
+      this.render(this.options.chatService.snapshot());
+    });
+    wrapper.append(clear);
+    return wrapper;
+  }
+
+  private renderSkillPalette(): HTMLElement | undefined {
+    if (!this.isSlashActive()) return undefined;
+    const panel = createElement("div", "siyuan-addon-skill-palette");
+    if (this.skillLoadStatus === "loading") {
+      panel.append(createElement("div", "siyuan-addon-skill-palette__empty", "正在读取 LLM-Wiki/skills..."));
+      return panel;
+    }
+    if (this.skillLoadStatus === "error") {
+      panel.append(createElement("div", "siyuan-addon-skill-palette__empty", this.skillLoadError || "读取 skill 列表失败"));
+      return panel;
+    }
+    const items = this.filteredSkills();
+    if (items.length === 0) {
+      panel.append(createElement("div", "siyuan-addon-skill-palette__empty", "没有匹配的 skill"));
+      return panel;
+    }
+    for (const [index, item] of items.entries()) {
+      const row = createElement(
+        "button",
+        `siyuan-addon-skill-palette__item${index === this.activeSkillIndex ? " siyuan-addon-skill-palette__item--active" : ""}`,
+      );
+      row.type = "button";
+      row.addEventListener("click", () => this.selectSkill(item));
+      row.append(createElement("span", "siyuan-addon-skill-palette__name", item.name));
+      row.append(createElement("span", "siyuan-addon-skill-palette__summary", item.summary));
+      panel.append(row);
+    }
+    return panel;
+  }
+
+  private handleSkillPaletteKeydown(event: KeyboardEvent, session: ChatSession): boolean {
+    if (!this.isSlashActive() || event.isComposing) return false;
+    const items = this.filteredSkills();
+    if (event.key === "Escape") {
+      event.preventDefault();
+      this.draft = "";
+      this.activeSkillIndex = 0;
+      this.focusComposerAfterRender = true;
+      this.render(session);
+      return true;
+    }
+    if (!items.length) return false;
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      this.activeSkillIndex = (this.activeSkillIndex + 1) % items.length;
+      this.focusComposerAfterRender = true;
+      this.render(session);
+      return true;
+    }
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      this.activeSkillIndex = (this.activeSkillIndex - 1 + items.length) % items.length;
+      this.focusComposerAfterRender = true;
+      this.render(session);
+      return true;
+    }
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      this.selectSkill(items[this.activeSkillIndex]);
+      return true;
+    }
+    return false;
+  }
+
+  private selectSkill(skill: SkillIndexItem): void {
+    this.selectedSkill = skill;
+    this.draft = "";
+    this.activeSkillIndex = 0;
+    this.focusComposerAfterRender = true;
+    this.render(this.options.chatService.snapshot());
+  }
+
+  private filteredSkills(): SkillIndexItem[] {
+    const query = this.draft.trim().replace(/^\//, "").trim().toLowerCase();
+    const items = query
+      ? this.skillItems.filter((item) => `${item.name} ${item.summary}`.toLowerCase().includes(query))
+      : this.skillItems;
+    return items.slice(0, 8);
+  }
+
+  private isSlashActive(): boolean {
+    return !this.selectedSkill && this.draft.trimStart().startsWith("/");
+  }
+
+  private async ensureSkillsLoaded(): Promise<void> {
+    if (this.skillLoadStatus === "ready" || this.skillLoadStatus === "loading") return this.skillLoadPromise;
+    this.skillLoadStatus = "loading";
+    this.skillLoadError = "";
+    this.skillLoadPromise = this.options.skillIndexReader
+      .listSkills()
+      .then((items) => {
+        this.skillItems = items;
+        this.skillLoadStatus = "ready";
+      })
+      .catch((error) => {
+        this.skillItems = [];
+        this.skillLoadStatus = "error";
+        this.skillLoadError = error instanceof Error ? error.message : String(error);
+      })
+      .finally(() => {
+        this.skillLoadPromise = undefined;
+        if (this.isSlashActive()) this.focusComposerAfterRender = true;
+        this.render(this.options.chatService.snapshot());
+      });
+    return this.skillLoadPromise;
   }
 
   private metaText(role: string, status: string): string {
@@ -162,24 +327,36 @@ export class ChatDock {
     if (!trace?.steps.length) return undefined;
     const details = document.createElement("details");
     details.className = "siyuan-addon-react";
-    details.open = !trace.collapsed;
+    details.open = this.traceOpenState.get(message.id) ?? !trace.collapsed;
+    details.addEventListener("toggle", () => {
+      this.traceOpenState.set(message.id, details.open);
+    });
     const summary = createElement("summary", "siyuan-addon-react__summary", `思考过程 · ${trace.steps.length} 轮`);
     details.append(summary);
     const list = createElement("div", "siyuan-addon-react__steps");
     for (const step of trace.steps) {
       const item = createElement("div", "siyuan-addon-react__step");
       item.append(createElement("div", "siyuan-addon-react__round", `第 ${step.round} 轮`));
-      item.append(createElement("div", "siyuan-addon-react__line", `Thought：${step.thought}`));
+      item.append(this.renderTraceLine("Thought", step.thought));
       for (const action of step.actions) {
-        item.append(createElement("div", "siyuan-addon-react__line", `Action：${action.toolName} ${action.argumentsSummary}`));
+        item.append(this.renderTraceLine("Action", `${action.toolName} ${action.argumentsSummary}`));
       }
       for (const observation of step.observations) {
-        item.append(createElement("div", "siyuan-addon-react__line", `Observation：${observation.summary}`));
+        item.append(this.renderTraceLine("Observation", observation.summary));
       }
       list.append(item);
     }
     details.append(list);
     return details;
+  }
+
+  private renderTraceLine(label: string, value: string): HTMLElement {
+    const line = createElement("div", "siyuan-addon-react__line");
+    line.append(createElement("div", "siyuan-addon-react__label", `${label}：`));
+    const body = createElement("div", "siyuan-addon-react__body");
+    renderMarkdown(body, value);
+    line.append(body);
+    return line;
   }
 
   private copyableMessageText(message: ChatMessage): string {

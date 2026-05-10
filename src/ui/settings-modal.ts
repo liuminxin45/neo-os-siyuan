@@ -10,6 +10,7 @@ import type { SettingsStore } from "../services/settings-store";
 import type { McpService } from "../services/mcp-service";
 import type { LlmProfile, LlmProfileDraft } from "../models/llm";
 import type { McpServerConfig, McpServerDraft, McpTransportType } from "../models/mcp";
+import { MAX_MEMORY_TURN_OPTIONS, type MaxMemoryTurns } from "../models/settings";
 import { maskSecret } from "../utils/masks";
 import { createElement } from "./render";
 
@@ -38,7 +39,7 @@ export class SettingsModal {
     const root = this.dialog?.element.querySelector(".siyuan-addon-settings") as HTMLElement | null;
     if (!root) return;
     root.innerHTML = "";
-    root.append(this.renderLlmSection(), this.renderMcpSection());
+    root.append(this.renderLlmSection(), this.renderMemorySection(), this.renderMcpSection());
   }
 
   private renderLlmSection(): HTMLElement {
@@ -100,6 +101,25 @@ export class SettingsModal {
       actions.append(addKimi);
     }
     section.append(list, actions);
+    return section;
+  }
+
+  private renderMemorySection(): HTMLElement {
+    const settings = this.options.store.get();
+    const section = createElement("section", "siyuan-addon-settings__section");
+    section.append(createElement("h2", "siyuan-addon-settings__title", "对话记忆"));
+    const select = this.select(
+      "最大记忆对话轮次",
+      MAX_MEMORY_TURN_OPTIONS.map((value) => ({ label: `${value} 轮`, value: String(value) })),
+      String(settings.maxMemoryTurns || 10),
+    );
+    select.addEventListener("change", async () => {
+      const value = Number(select.value) as MaxMemoryTurns;
+      if (!MAX_MEMORY_TURN_OPTIONS.includes(value)) return;
+      await this.options.store.setMaxMemoryTurns(value);
+      this.options.onSettingsChanged();
+    });
+    section.append(select.parentElement!);
     return section;
   }
 
@@ -282,6 +302,22 @@ export class SettingsModal {
     input.value = value;
     label.append(span, input);
     return input;
+  }
+
+  private select(labelText: string, options: Array<{ label: string; value: string }>, value: string): HTMLSelectElement {
+    const label = createElement("label", "siyuan-addon-field");
+    const span = createElement("span", "", labelText);
+    const select = document.createElement("select");
+    select.className = "b3-select fn__block";
+    options.forEach((option) => {
+      const item = document.createElement("option");
+      item.value = option.value;
+      item.textContent = option.label;
+      item.selected = option.value === value;
+      select.append(item);
+    });
+    label.append(span, select);
+    return select;
   }
 
   private textarea(labelText: string, value: string): HTMLTextAreaElement {

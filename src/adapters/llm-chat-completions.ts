@@ -85,8 +85,10 @@ const toWireMessages = (
       return `${tool.llmName}: properties=[${propertyNames.join(", ")}]${actions.length ? ` actions=[${actions.join(", ")}]` : ""}`;
     })
     .join("\n");
+  const skillInstruction =
+    "当用户消息包含“已选 skill”时，插件只提供了 skill 名称、简述和索引路径。你必须先理解用户真实目标；目标不清楚时先追问。需要读取完整 skill、访问 LLM-Wiki/runs、读取或写入任何思源工作区内容时，必须通过 MCP 工具完成，不要假设插件已经读取过这些内容。只有 Observation 中出现成功的 MCP 写入类调用后，才可以说已经记录、保存或写入。";
   const toolHint = toolNames
-    ? `当前可调用的 MCP tools.name：${toolNames}。\n可用工具契约摘要：\n${toolContracts}\n本插件主要用于思源笔记工作区，用户即使没有明确说“使用 MCP”，只要问题涉及笔记本、文档、块、数据库、标签、文件、搜索、当前工作区内容、笔记内容或需要查询/读取/遍历/统计思源里的信息，就应优先查看可用工具的 description 和 input_schema，自主选择合适 MCP 工具并用结构化工具调用协议执行。调用工具前必须检查 input_schema，尤其是 action enum 和必填字段；不要用空参数调用需要 action 或查询参数的工具。每轮调用后必须阅读 ReAct 历史里的 Observation 并基于结果继续；如果上一轮 help 已返回用法，下一轮不要重复 help，要选择具体 action 和参数。只有纯常识、写作、解释或无需工作区数据的问题才直接回答。不要在正文中输出 XML、伪标签或未出现在 tools.name 中的工具名。`
+    ? `当前可调用的 MCP tools.name：${toolNames}。\n可用工具契约摘要：\n${toolContracts}\n本插件主要用于思源笔记工作区，用户即使没有明确说“使用 MCP”，只要问题涉及笔记本、文档、块、数据库、标签、文件、搜索、当前工作区内容、笔记内容或需要查询/读取/遍历/统计思源里的信息，就应优先查看可用工具的 description 和 input_schema，自主选择合适 MCP 工具并用结构化工具调用协议执行。${skillInstruction}调用工具前必须检查 input_schema，尤其是 action enum 和必填字段；不要用空参数调用需要 action 或查询参数的工具。每轮调用后必须阅读 ReAct 历史里的 Observation 并基于结果继续；如果上一轮 help 已返回用法，下一轮不要重复 help，要选择具体 action 和参数。如果用户说“这篇”“那篇”“上一篇”等指代，而前文或 Observation 已经出现明确 path，应优先 read 该 path，不要重新泛搜关键词。只有纯常识、写作、解释或无需工作区数据的问题才直接回答。不要在正文中输出 XML、伪标签或未出现在 tools.name 中的工具名。`
     : "当前没有可调用的 MCP tools；如果用户请求涉及思源工作区数据，应明确说明没有可用 MCP 工具，不要在正文中伪造工具调用标签。";
   const wire: LlmWireMessage[] = [
     {
@@ -124,7 +126,7 @@ const toAnthropicWireMessages = (
   if (system?.role === "system") {
     const toolNames = tools.map((tool) => tool.llmName).join(", ");
     const toolHint = toolNames
-      ? `\n当前可用 MCP 工具名必须完全按 tools.name 使用：${toolNames}。请根据每个工具的 description 和 input_schema 自行判断用户意图、选择工具与参数。用户没有明确说 MCP 时，只要问题需要思源工作区数据，也要优先调用合适工具。调用前必须检查 action enum 和必填字段，不要用空参数调用需要 action 或查询参数的工具。每轮调用后必须阅读 ReAct 历史里的 Observation 并基于结果继续；如果上一轮 help 已返回用法，下一轮不要重复 help，要选择具体 action 和参数。不要编造未出现在 tools.name 中的工具名。`
+      ? `\n当前可用 MCP 工具名必须完全按 tools.name 使用：${toolNames}。请根据每个工具的 description 和 input_schema 自行判断用户意图、选择工具与参数。用户没有明确说 MCP 时，只要问题需要思源工作区数据，也要优先调用合适工具。调用前必须检查 action enum 和必填字段，不要用空参数调用需要 action 或查询参数的工具。每轮调用后必须阅读 ReAct 历史里的 Observation 并基于结果继续；如果上一轮 help 已返回用法，下一轮不要重复 help，要选择具体 action 和参数。如果用户说“这篇”“那篇”“上一篇”等指代，而前文或 Observation 已经出现明确 path，应优先 read 该 path，不要重新泛搜关键词。不要编造未出现在 tools.name 中的工具名。`
       : "";
     system.content = `${system.content}\nKimi CodingPlan 必须使用 Anthropic Messages 的结构化 tools/tool_use 协议调用工具。不要在正文中输出 <function_calls>、<invoke> 或 <antThinking> 标签。${toolHint}`;
   }
