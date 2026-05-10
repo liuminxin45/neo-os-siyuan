@@ -79,6 +79,7 @@ const settings = {
 };
 
 const chatSession = {
+  conversationId: "conv_1778307810068_5jot5q",
   messages: [
     { id: "msg_user", role: "user", content: "查一下", createdAt: now, status: "complete" },
     {
@@ -87,6 +88,7 @@ const chatSession = {
       content: "已完成。",
       createdAt: now,
       status: "complete",
+      references: [{ title: "参考文档", path: "wiki/knowledge/ref.md", sourceLabel: "LLM Wiki" }],
       reactTrace: {
         collapsed: true,
         waitingContinuation: false,
@@ -119,6 +121,17 @@ const chatSession = {
   isGenerating: false,
   generationId: "gen_done",
   agentMode: "react",
+  archives: [
+    {
+      conversationId: "conv_1778307810068_5jot5q",
+      fileName: "conv_1778307810068_5jot5q.json",
+      path: "/data/notebook/runs/chats/conv_1778307810068_5jot5q.json",
+      title: "查一下",
+      updatedAt: Date.now(),
+      messageCount: 2,
+    },
+  ],
+  archiveStatus: "ready",
 };
 
 const checks = [

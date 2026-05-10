@@ -3,7 +3,17 @@ const IMAGE_PROTOCOLS = new Set(["http:", "https:"]);
 
 type TableAlign = "left" | "center" | "right" | undefined;
 
-export const renderMarkdown = (target: HTMLElement, markdown: string): void => {
+export interface MarkdownDocumentTarget {
+  id?: string;
+  title?: string;
+  path?: string;
+}
+
+export interface MarkdownRenderOptions {
+  onOpenDocument?: (target: MarkdownDocumentTarget) => void;
+}
+
+export const renderMarkdown = (target: HTMLElement, markdown: string, options: MarkdownRenderOptions = {}): void => {
   target.replaceChildren();
   const lines = markdown.replace(/\r\n?/g, "\n").split("\n");
   let index = 0;
@@ -44,7 +54,7 @@ export const renderMarkdown = (target: HTMLElement, markdown: string): void => {
     if (heading) {
       const level = heading[1].length as 1 | 2 | 3 | 4 | 5 | 6;
       const element = document.createElement(`h${level}`);
-      appendInlineMarkdown(element, heading[2]);
+      appendInlineMarkdown(element, heading[2], options);
       target.append(element);
       index += 1;
       continue;
@@ -57,13 +67,13 @@ export const renderMarkdown = (target: HTMLElement, markdown: string): void => {
         index += 1;
       }
       const blockquote = document.createElement("blockquote");
-      renderMarkdown(blockquote, quoteLines.join("\n"));
+      renderMarkdown(blockquote, quoteLines.join("\n"), options);
       target.append(blockquote);
       continue;
     }
 
     if (isTableStart(lines, index)) {
-      const { table, nextIndex } = renderTable(lines, index);
+      const { table, nextIndex } = renderTable(lines, index, options);
       target.append(table);
       index = nextIndex;
       continue;
@@ -85,9 +95,9 @@ export const renderMarkdown = (target: HTMLElement, markdown: string): void => {
           checkbox.checked = task[1].toLowerCase() === "x";
           checkbox.disabled = true;
           item.append(checkbox);
-          appendInlineMarkdown(item, task[2]);
+          appendInlineMarkdown(item, task[2], options);
         } else {
-          appendInlineMarkdown(item, itemMatch[3]);
+          appendInlineMarkdown(item, itemMatch[3], options);
         }
         list.append(item);
         index += 1;
@@ -111,14 +121,14 @@ export const renderMarkdown = (target: HTMLElement, markdown: string): void => {
       index += 1;
     }
     const paragraph = document.createElement("p");
-    appendInlineMarkdown(paragraph, paragraphLines.join("\n"));
+    appendInlineMarkdown(paragraph, paragraphLines.join("\n"), options);
     target.append(paragraph);
   }
 };
 
-export const appendInlineMarkdown = (target: HTMLElement, markdown: string): void => {
+export const appendInlineMarkdown = (target: HTMLElement, markdown: string, options: MarkdownRenderOptions = {}): void => {
   const pattern =
-    /(`[^`]+`|!\[[^\]]*]\([^)]+\)|\[[^\]]+]\([^)]+\)|https?:\/\/[^\s<)]+|~~[^~]+~~|\*\*[^*]+\*\*|__[^_]+__|\*[^*]+\*|_[^_]+_|\n)/g;
+    /(`[^`]+`|\[\[[^\]]+]]|!\[[^\]]*]\([^)]+\)|\[[^\]]+]\([^)]+\)|https?:\/\/[^\s<)]+|~~[^~]+~~|\*\*[^*]+\*\*|__[^_]+__|\*[^*]+\*|_[^_]+_|\n)/g;
   let lastIndex = 0;
   let match: RegExpExecArray | null;
 
@@ -126,7 +136,7 @@ export const appendInlineMarkdown = (target: HTMLElement, markdown: string): voi
     if (match.index > lastIndex) {
       target.append(document.createTextNode(markdown.slice(lastIndex, match.index)));
     }
-    appendInlineToken(target, match[0]);
+    appendInlineToken(target, match[0], options);
     lastIndex = pattern.lastIndex;
   }
 
@@ -135,7 +145,7 @@ export const appendInlineMarkdown = (target: HTMLElement, markdown: string): voi
   }
 };
 
-const appendInlineToken = (target: HTMLElement, token: string): void => {
+const appendInlineToken = (target: HTMLElement, token: string, options: MarkdownRenderOptions): void => {
   if (token === "\n") {
     target.append(document.createElement("br"));
     return;
@@ -145,6 +155,12 @@ const appendInlineToken = (target: HTMLElement, token: string): void => {
     const code = document.createElement("code");
     code.textContent = token.slice(1, -1);
     target.append(code);
+    return;
+  }
+
+  const wikiLink = token.match(/^\[\[([^\]]+)]]$/);
+  if (wikiLink) {
+    appendDocumentButton(target, wikiLink[1], { title: wikiLink[1] }, options);
     return;
   }
 
@@ -179,7 +195,7 @@ const appendInlineToken = (target: HTMLElement, token: string): void => {
   const deleted = token.match(/^~~([\s\S]+)~~$/);
   if (deleted) {
     const element = document.createElement("del");
-    appendInlineMarkdown(element, deleted[1]);
+    appendInlineMarkdown(element, deleted[1], options);
     target.append(element);
     return;
   }
@@ -187,7 +203,7 @@ const appendInlineToken = (target: HTMLElement, token: string): void => {
   const strong = token.match(/^(\*\*|__)([\s\S]+)\1$/);
   if (strong) {
     const element = document.createElement("strong");
-    appendInlineMarkdown(element, strong[2]);
+    appendInlineMarkdown(element, strong[2], options);
     target.append(element);
     return;
   }
@@ -195,24 +211,34 @@ const appendInlineToken = (target: HTMLElement, token: string): void => {
   const emphasis = token.match(/^(\*|_)([\s\S]+)\1$/);
   if (emphasis) {
     const element = document.createElement("em");
-    appendInlineMarkdown(element, emphasis[2]);
+    appendInlineMarkdown(element, emphasis[2], options);
     target.append(element);
     return;
   }
 
   const link = token.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
   if (link) {
-    const href = safeHref(link[2].trim());
+    const label = link[1].trim();
+    const rawHref = link[2].trim();
+    if (rawHref.startsWith("siyuan-doc://")) {
+      appendDocumentButton(target, label, { title: label, id: rawHref.replace(/^siyuan-doc:\/\//, "") }, options);
+      return;
+    }
+    const href = safeHref(rawHref);
     if (href) {
       const anchor = document.createElement("a");
       anchor.href = href;
       anchor.target = "_blank";
       anchor.rel = "noreferrer";
-      appendInlineMarkdown(anchor, link[1]);
+      appendInlineMarkdown(anchor, label, options);
       target.append(anchor);
       return;
     }
-    target.append(document.createTextNode(link[1]));
+    if (isDocumentHref(rawHref, options)) {
+      appendDocumentButton(target, label, { title: label, path: rawHref }, options);
+      return;
+    }
+    target.append(document.createTextNode(label));
     return;
   }
 
@@ -224,7 +250,11 @@ const isHorizontalRule = (line: string): boolean => /^ {0,3}([-*_])(?:\s*\1){2,}
 const isTableStart = (lines: string[], index: number): boolean =>
   index + 1 < lines.length && splitTableRow(lines[index]).length > 1 && isTableSeparator(lines[index + 1]);
 
-const renderTable = (lines: string[], startIndex: number): { table: HTMLTableElement; nextIndex: number } => {
+const renderTable = (
+  lines: string[],
+  startIndex: number,
+  options: MarkdownRenderOptions,
+): { table: HTMLTableElement; nextIndex: number } => {
   const headerCells = splitTableRow(lines[startIndex]);
   const aligns = splitTableRow(lines[startIndex + 1]).map(parseTableAlign);
   const table = document.createElement("table");
@@ -235,7 +265,7 @@ const renderTable = (lines: string[], startIndex: number): { table: HTMLTableEle
   headerCells.forEach((cell, cellIndex) => {
     const th = document.createElement("th");
     applyTableAlign(th, aligns[cellIndex]);
-    appendInlineMarkdown(th, cell.trim());
+    appendInlineMarkdown(th, cell.trim(), options);
     headerRow.append(th);
   });
   thead.append(headerRow);
@@ -253,7 +283,7 @@ const renderTable = (lines: string[], startIndex: number): { table: HTMLTableEle
     for (let cellIndex = 0; cellIndex < columnCount; cellIndex += 1) {
       const td = document.createElement("td");
       applyTableAlign(td, aligns[cellIndex]);
-      appendInlineMarkdown(td, (cells[cellIndex] || "").trim());
+      appendInlineMarkdown(td, (cells[cellIndex] || "").trim(), options);
       row.append(td);
     }
     tbody.append(row);
@@ -324,4 +354,32 @@ const safeImageSrc = (src: string): string | undefined => {
   } catch {
     return undefined;
   }
+};
+
+const isDocumentHref = (href: string, options: MarkdownRenderOptions): boolean =>
+  Boolean(options.onOpenDocument) &&
+  !href.startsWith("#") &&
+  !/^[a-z][a-z0-9+.-]*:/i.test(href) &&
+  /(?:^|\/)(wiki|raw|runs|skills)\//i.test(href.replace(/\\/g, "/"));
+
+const appendDocumentButton = (
+  target: HTMLElement,
+  label: string,
+  documentTarget: MarkdownDocumentTarget,
+  options: MarkdownRenderOptions,
+): void => {
+  if (!options.onOpenDocument) {
+    target.append(document.createTextNode(`[[${label}]]`));
+    return;
+  }
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "siyuan-addon-doc-link";
+  button.textContent = label.includes("|") ? label.split("|").slice(-1)[0].trim() : label;
+  button.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    options.onOpenDocument?.(documentTarget);
+  });
+  target.append(button);
 };

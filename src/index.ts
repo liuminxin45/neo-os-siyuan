@@ -5,6 +5,8 @@ import { SettingsStore } from "./services/settings-store";
 import { ChatService } from "./services/chat-service";
 import { McpService } from "./services/mcp-service";
 import { SiyuanSkillIndexReader } from "./services/siyuan-skill-index";
+import { SiyuanChatArchiveStore } from "./services/siyuan-chat-archive";
+import { SiyuanDocumentOpener } from "./services/siyuan-document-opener";
 import { getActiveProfile } from "./services/llm-profile-service";
 
 const DOCK_TYPE = "siyuan-addon-ai-chat";
@@ -14,6 +16,8 @@ export default class SiyuanAddonPlugin extends Plugin {
   private settingsStore?: SettingsStore;
   private mcpService?: McpService;
   private skillIndexReader?: SiyuanSkillIndexReader;
+  private chatArchiveStore?: SiyuanChatArchiveStore;
+  private documentOpener?: SiyuanDocumentOpener;
   private chatService?: ChatService;
   private chatDock?: ChatDock;
 
@@ -24,8 +28,11 @@ export default class SiyuanAddonPlugin extends Plugin {
     this.settingsStore = new SettingsStore(this);
     this.mcpService = new McpService();
     this.skillIndexReader = new SiyuanSkillIndexReader();
+    this.chatArchiveStore = new SiyuanChatArchiveStore();
+    this.documentOpener = new SiyuanDocumentOpener(this.app);
     this.chatService = new ChatService({
       mcpService: this.mcpService,
+      archiveStore: this.chatArchiveStore,
       getActiveProfile: () => {
         const settings = this.settingsStore?.get();
         return settings ? getActiveProfile(settings.llmProfiles, settings.activeProfileId) : undefined;
@@ -38,12 +45,14 @@ export default class SiyuanAddonPlugin extends Plugin {
       settingsStore: this.settingsStore,
       mcpService: this.mcpService,
       skillIndexReader: this.skillIndexReader,
+      documentOpener: this.documentOpener,
     });
     this.registerDock();
     void this.initializeSettingsAndMcp();
   }
 
   onunload(): void {
+    void this.chatService?.saveCurrentSession();
     this.chatDock?.unmount();
     void this.mcpService?.closeAll();
   }
@@ -67,6 +76,7 @@ export default class SiyuanAddonPlugin extends Plugin {
         plugin.chatDock?.mount((dock?.element || this.element) as HTMLElement);
       },
       destroy: () => {
+        void this.chatService?.saveCurrentSession();
         this.chatDock?.unmount();
       },
     });
@@ -97,6 +107,7 @@ export default class SiyuanAddonPlugin extends Plugin {
       });
     }
     this.chatService?.refresh();
+    void this.chatService?.loadArchives();
   }
 
   private dedupeDockLayout(): void {

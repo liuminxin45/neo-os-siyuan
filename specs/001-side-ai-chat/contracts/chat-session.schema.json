@@ -2,11 +2,12 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://leoiu.local/siyuan-addon/chat-session.schema.json",
   "title": "ChatSession",
-  "description": "In-memory only. This schema documents runtime state, not persisted plugin data.",
+  "description": "Runtime state. Chat messages can be archived to LLM-Wiki/runs/chats through SiYuan file APIs.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["messages", "toolCalls", "isGenerating"],
+  "required": ["conversationId", "messages", "toolCalls", "isGenerating", "archives", "archiveStatus"],
   "properties": {
+    "conversationId": { "type": "string", "pattern": "^conv_[0-9]+_[a-z0-9]+$" },
     "messages": {
       "type": "array",
       "items": {
@@ -21,6 +22,19 @@
           "status": { "enum": ["pending", "streaming", "complete", "error", "stopped", "waiting-continue"] },
           "toolCallId": { "type": "string" },
           "pauseHint": { "type": "string" },
+          "references": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["title", "path"],
+              "properties": {
+                "title": { "type": "string", "minLength": 1 },
+                "path": { "type": "string", "minLength": 1 },
+                "sourceLabel": { "type": "string" }
+              }
+            }
+          },
           "reactTrace": {
             "type": "object",
             "additionalProperties": false,
@@ -95,6 +109,24 @@
     "isGenerating": { "type": "boolean" },
     "generationId": { "type": "string" },
     "agentMode": { "enum": ["react", "reflection", "plan-and-execute"] },
+    "archives": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["conversationId", "fileName", "path", "title", "updatedAt", "messageCount"],
+        "properties": {
+          "conversationId": { "type": "string", "pattern": "^conv_[0-9]+_[a-z0-9]+$" },
+          "fileName": { "type": "string", "pattern": "^conv_[0-9]+_[a-z0-9]+\\.json$" },
+          "path": { "type": "string", "minLength": 1 },
+          "title": { "type": "string" },
+          "updatedAt": { "type": "number" },
+          "messageCount": { "type": "integer", "minimum": 0 }
+        }
+      }
+    },
+    "archiveStatus": { "enum": ["idle", "loading", "ready", "saving", "error"] },
+    "archiveError": { "type": "string" },
     "continuation": {
       "type": "object",
       "additionalProperties": false,
