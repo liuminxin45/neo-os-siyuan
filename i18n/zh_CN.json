@@ -1,1 +1,14 @@
-{}
+{
+  "dockTitle": "AI 聊天",
+  "settings": "设置",
+  "send": "发送",
+  "stop": "停止",
+  "clear": "清空",
+  "emptyNeedProfile": "请先在设置中添加 LLM 配置。",
+  "emptyReady": "输入问题开始聊天。",
+  "inputPlaceholder": "输入消息，Enter 发送，Shift+Enter 换行",
+  "toolRunning": "调用中",
+  "toolSuccess": "完成",
+  "toolError": "失败",
+  "toolStopped": "已停止"
+}
