@@ -20,8 +20,8 @@ Validation:
 
 - `id`: Stable local id.
 - `name`: User-visible profile name.
-- `provider`: `openai-compatible` or `deepseek`.
-- `baseUrl`: Required for `openai-compatible`; hidden/preset for `deepseek`.
+- `provider`: `openai-compatible`, `deepseek`, or `kimi-coding-plan`.
+- `baseUrl`: Required for `openai-compatible`; hidden/preset for `deepseek` and `kimi-coding-plan`.
 - `apiKey`: Required secret.
 - `model`: Required model id.
 - `isActive`: Derived from `PluginSettings.activeProfileId`, not separately persisted.
@@ -30,9 +30,11 @@ Validation:
 
 Validation:
 
-- `name`, `apiKey`, and `model` are required for all providers.
+- `name` and `model` are required for all providers.
+- `apiKey` is required for `openai-compatible`, `deepseek`, and `kimi-coding-plan`.
 - `baseUrl` is required only for OpenAI-compatible profiles and must be an HTTP(S) URL.
 - DeepSeek profile editing must not require Base URL.
+- Kimi CodingPlan profile editing must use the fixed `https://api.kimi.com/coding` endpoint.
 
 ## MCPServer
 

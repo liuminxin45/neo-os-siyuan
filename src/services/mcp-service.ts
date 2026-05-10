@@ -72,6 +72,9 @@ export const cloneServerToDraft = (server: McpServerConfig): McpServerDraft => (
 const createLlmToolName = (server: McpServerConfig, toolName: string): string =>
   `${server.name}_${toolName}`.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 64);
 
+const isMcpErrorResult = (result: unknown): boolean =>
+  typeof result === "object" && result !== null && (result as { isError?: unknown }).isError === true;
+
 export class McpService {
   private connections = new Map<string, ConnectedMcpServer>();
   private tools = new Map<string, McpTool[]>();
@@ -119,6 +122,9 @@ export class McpService {
       const result = await connection.callTool(tool.name, args);
       if (generationId.endsWith(":stopped")) {
         return { ...call, status: "stopped", finishedAt: nowIso() };
+      }
+      if (isMcpErrorResult(result)) {
+        return { ...call, status: "error", finishedAt: nowIso(), error: summarizeJson(result, 800) || "MCP 工具返回错误" };
       }
       return { ...call, status: "success", finishedAt: nowIso(), outputSummary: summarizeJson(result, 800) };
     } catch (error) {

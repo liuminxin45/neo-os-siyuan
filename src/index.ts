@@ -7,6 +7,7 @@ import { McpService } from "./services/mcp-service";
 import { getActiveProfile } from "./services/llm-profile-service";
 
 const DOCK_TYPE = "siyuan-addon-ai-chat";
+const SIYUAN_DOCK_TYPE = "siyuan-addonsiyuan-addon-ai-chat";
 
 export default class SiyuanAddonPlugin extends Plugin {
   private settingsStore?: SettingsStore;
@@ -42,6 +43,7 @@ export default class SiyuanAddonPlugin extends Plugin {
   }
 
   private registerDock(): void {
+    this.dedupeDockLayout();
     const plugin = this;
     this.addDock({
       config: {
@@ -62,5 +64,38 @@ export default class SiyuanAddonPlugin extends Plugin {
         this.chatDock?.unmount();
       },
     });
+    this.dedupeDockLayout();
+    window.setTimeout(() => this.dedupeDockLayout(), 0);
+  }
+
+  private dedupeDockLayout(): void {
+    const siyuanWindow = window as typeof window & {
+      siyuan?: { config?: { uiLayout?: unknown } };
+    };
+    const layout = siyuanWindow.siyuan?.config?.uiLayout;
+    if (!layout) return;
+    let seen = false;
+    const visit = (value: unknown): void => {
+      if (!value) return;
+      if (Array.isArray(value)) {
+        for (let index = 0; index < value.length; index += 1) {
+          const item = value[index] as { type?: string } | unknown;
+          if (item && typeof item === "object" && (item as { type?: string }).type === SIYUAN_DOCK_TYPE) {
+            if (seen) {
+              value.splice(index, 1);
+              index -= 1;
+            } else {
+              seen = true;
+            }
+            continue;
+          }
+          visit(item);
+        }
+        return;
+      }
+      if (typeof value !== "object") return;
+      Object.values(value as Record<string, unknown>).forEach(visit);
+    };
+    visit(layout);
   }
 }

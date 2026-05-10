@@ -1,7 +1,7 @@
 import type { LlmProfile } from "../models/llm";
 import type { ChatMessage } from "../models/chat";
 import type { McpTool, McpToolCall } from "../models/mcp";
-import { DEEPSEEK_BASE_URL } from "../models/llm";
+import { DEEPSEEK_BASE_URL, KIMI_CODING_BASE_URL } from "../models/llm";
 import { normalizeBaseUrl } from "../utils/text";
 
 interface LlmWireMessage {
@@ -18,6 +18,12 @@ interface LlmToolCall {
     name: string;
     arguments: string;
   };
+}
+
+interface AnthropicToolCall {
+  id: string;
+  name: string;
+  inputJson: string;
 }
 
 export interface LlmToolRequest {
@@ -43,6 +49,14 @@ const endpointForProfile = (profile: LlmProfile): string => {
   return `${normalizeBaseUrl(baseUrl)}/chat/completions`;
 };
 
+const anthropicEndpointForProfile = (profile: LlmProfile): string => {
+  const baseUrl = profile.provider === "kimi-coding-plan" ? KIMI_CODING_BASE_URL : profile.baseUrl || "";
+  const trimmed = normalizeBaseUrl(baseUrl);
+  if (/\/v\d+\/messages$/i.test(trimmed)) return trimmed;
+  if (/\/v\d+$/i.test(trimmed)) return `${trimmed}/messages`;
+  return `${trimmed}/v1/messages`;
+};
+
 const toWireMessages = (messages: ChatMessage[], toolResults: McpToolCall[] = []): LlmWireMessage[] => {
   const wire: LlmWireMessage[] = [
     {
@@ -53,6 +67,8 @@ const toWireMessages = (messages: ChatMessage[], toolResults: McpToolCall[] = []
   ];
   for (const message of messages) {
     if (message.role === "user" || message.role === "assistant") {
+      const content = message.content.trim();
+      if (message.role === "assistant" && !content) continue;
       wire.push({ role: message.role, content: message.content });
     }
   }
@@ -67,6 +83,23 @@ const toWireMessages = (messages: ChatMessage[], toolResults: McpToolCall[] = []
   return wire;
 };
 
+const toAnthropicWireMessages = (
+  messages: ChatMessage[],
+  toolResults: McpToolCall[] = [],
+  tools: McpTool[] = [],
+): LlmWireMessage[] => {
+  const wire = toWireMessages(messages, toolResults);
+  const system = wire[0];
+  if (system?.role === "system") {
+    const toolNames = tools.map((tool) => tool.llmName).join(", ");
+    const toolHint = toolNames
+      ? `\n当前可用 MCP 工具名必须完全按 tools.name 使用：${toolNames}。请根据每个工具的 description 和 input_schema 自行选择工具与参数，不要编造未出现在 tools.name 中的工具名。`
+      : "";
+    system.content = `${system.content}\nKimi CodingPlan 必须使用 Anthropic Messages 的结构化 tools/tool_use 协议调用工具。不要在正文中输出 <function_calls>、<invoke> 或 <antThinking> 标签。${toolHint}`;
+  }
+  return wire;
+};
+
 const toLlmTools = (tools: McpTool[]) =>
   tools.map((tool) => ({
     type: "function",
@@ -75,6 +108,13 @@ const toLlmTools = (tools: McpTool[]) =>
       description: tool.description || tool.name,
       parameters: tool.inputSchema || { type: "object", properties: {} },
     },
+  }));
+
+const toAnthropicTools = (tools: McpTool[]) =>
+  tools.map((tool) => ({
+    name: tool.llmName,
+    description: tool.description || tool.name,
+    input_schema: tool.inputSchema || { type: "object", properties: {} },
   }));
 
 const parseToolArgs = (value: string): Record<string, unknown> => {
@@ -108,18 +148,182 @@ const throwIfAborted = (signal?: AbortSignal): void => {
   throw error;
 };
 
+const collectAnthropicToolEvent = (toolCalls: AnthropicToolCall[], event: any): void => {
+  const index = event.index ?? 0;
+  if (event.type === "content_block_start" && event.content_block?.type === "tool_use") {
+    toolCalls[index] = {
+      id: event.content_block.id || `tool_${index}`,
+      name: event.content_block.name || "",
+      inputJson: event.content_block.input ? JSON.stringify(event.content_block.input) : "",
+    };
+    return;
+  }
+  if (event.type !== "content_block_delta" || event.delta?.type !== "input_json_delta") return;
+  toolCalls[index] ||= { id: `tool_${index}`, name: "", inputJson: "" };
+  toolCalls[index].inputJson += event.delta.partial_json || "";
+};
+
+const xmlDecode = (value: string): string =>
+  value
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&amp;/g, "&");
+
+const resolveLegacyToolCall = (
+  rawName: string,
+  rawArgs: Record<string, unknown>,
+  tools: McpTool[],
+): { name: string; arguments: Record<string, unknown> } => {
+  const exact = tools.find((tool) => tool.llmName === rawName);
+  if (exact) return { name: exact.llmName, arguments: rawArgs };
+
+  const sameName = tools.filter((tool) => tool.name === rawName);
+  if (sameName.length === 1) {
+    return { name: sameName[0].llmName, arguments: rawArgs };
+  }
+
+  return { name: rawName, arguments: rawArgs };
+};
+
+const parseLegacyKimiToolCalls = (content: string, tools: McpTool[] = []): LlmToolRequest[] => {
+  const block = content.match(/<function_calls>([\s\S]*?)<\/function_calls>/i)?.[1];
+  if (!block) return [];
+  const requests: LlmToolRequest[] = [];
+  const invokePattern = /<invoke\s+name=["']([^"']+)["']\s*>([\s\S]*?)<\/invoke>/gi;
+  let invoke: RegExpExecArray | null;
+  while ((invoke = invokePattern.exec(block))) {
+    const args: Record<string, unknown> = {};
+    const paramPattern = /<parameter\s+name=["']([^"']+)["']\s*>([\s\S]*?)<\/parameter>/gi;
+    let param: RegExpExecArray | null;
+    while ((param = paramPattern.exec(invoke[2]))) {
+      const rawValue = xmlDecode(param[2].trim());
+      try {
+        args[param[1]] = JSON.parse(rawValue);
+      } catch {
+        args[param[1]] = rawValue;
+      }
+    }
+    const resolved = resolveLegacyToolCall(invoke[1], args, tools);
+    requests.push({ id: `tool_${requests.length}`, name: resolved.name, arguments: resolved.arguments });
+  }
+  return requests;
+};
+
+const stripLegacyKimiToolMarkup = (content: string): string =>
+  content
+    .replace(/<antThinking>[\s\S]*?<\/antThinking>/gi, "")
+    .replace(/<function_calls>[\s\S]*?<\/function_calls>/gi, "")
+    .trim();
+
+const streamAnthropicMessages = async (
+  profile: LlmProfile,
+  messages: ChatMessage[],
+  handlers: LlmStreamHandlers,
+): Promise<LlmStreamResult> => {
+  throwIfAborted(handlers.signal);
+  const wireMessages = toAnthropicWireMessages(messages, handlers.toolResults || [], handlers.tools || []);
+  const system = wireMessages
+    .filter((message) => message.role === "system")
+    .map((message) => message.content || "")
+    .join("\n\n");
+  const conversation = wireMessages
+    .filter((message) => message.role === "user" || message.role === "assistant")
+    .map((message) => ({ role: message.role, content: message.content || "" }));
+  const response = await fetch(anthropicEndpointForProfile(profile), {
+    method: "POST",
+    signal: handlers.signal,
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": profile.apiKey || "",
+      "anthropic-version": "2023-06-01",
+      "anthropic-dangerous-direct-browser-access": "true",
+    },
+    body: JSON.stringify({
+      model: profile.model,
+      system: system || undefined,
+      messages: conversation,
+      stream: true,
+      max_tokens: 4096,
+      tools: handlers.tools?.length ? toAnthropicTools(handlers.tools) : undefined,
+      tool_choice: handlers.tools?.length ? { type: "auto" } : undefined,
+    }),
+  });
+  if (!response.ok) {
+    throw new Error(`Kimi CodingPlan 请求失败：${response.status} ${response.statusText}`);
+  }
+  if (!response.body) throw new Error("Kimi CodingPlan 响应没有可读取的数据流");
+
+  const reader = response.body.getReader();
+  const cancelReader = (): void => {
+    void reader.cancel().catch(() => undefined);
+  };
+  handlers.signal?.addEventListener("abort", cancelReader, { once: true });
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let content = "";
+  const toolCalls: AnthropicToolCall[] = [];
+
+  try {
+    while (true) {
+      throwIfAborted(handlers.signal);
+      const { value, done } = await reader.read();
+      throwIfAborted(handlers.signal);
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split(/\r?\n/);
+      buffer = lines.pop() || "";
+      for (const rawLine of lines) {
+        const line = rawLine.trim();
+        if (!line.startsWith("data:")) continue;
+        const data = line.slice(5).trim();
+        if (!data || data === "[DONE]") continue;
+        const parsed = JSON.parse(data);
+        const text = parsed.type === "content_block_delta" && parsed.delta?.type === "text_delta" ? parsed.delta.text : "";
+        if (text) {
+          content += text;
+        }
+        collectAnthropicToolEvent(toolCalls, parsed);
+      }
+    }
+  } finally {
+    handlers.signal?.removeEventListener("abort", cancelReader);
+  }
+
+  const visibleContent = stripLegacyKimiToolMarkup(content);
+  if (visibleContent) handlers.onText(visibleContent);
+
+  return {
+    content: visibleContent,
+    toolRequests: [
+      ...toolCalls
+      .filter((call) => call.name)
+      .map((call) => ({
+        id: call.id,
+        name: call.name,
+        arguments: parseToolArgs(call.inputJson),
+      })),
+      ...parseLegacyKimiToolCalls(content, handlers.tools || []),
+    ],
+  };
+};
+
 export const streamChatCompletion = async (
   profile: LlmProfile,
   messages: ChatMessage[],
   handlers: LlmStreamHandlers,
 ): Promise<LlmStreamResult> => {
+  if (profile.provider === "kimi-coding-plan") {
+    return streamAnthropicMessages(profile, messages, handlers);
+  }
   throwIfAborted(handlers.signal);
   const response = await fetch(endpointForProfile(profile), {
     method: "POST",
     signal: handlers.signal,
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${profile.apiKey}`,
+      Authorization: `Bearer ${profile.apiKey || ""}`,
     },
     body: JSON.stringify({
       model: profile.model,

@@ -10,6 +10,7 @@
 - The first version must support side-panel chat and automatic MCP tool use.
 - The first version does not need document summarization, selected-text rewriting, document insertion, or reading Siyuan document context.
 - LLM configuration must support OpenAI-compatible providers and DeepSeek.
+- LLM configuration must also support Kimi CodingPlan through the Kimi coding endpoint.
 - The first version must provide a right-side Dock entry.
 - Chat sends with Enter. Shift+Enter inserts a newline.
 - LLM configuration must support multiple profiles and active profile switching.
@@ -137,6 +138,7 @@ A user can chat during the current plugin session and manually clear the visible
 - **FR-021**: The user MUST be able to stop an in-progress generation.
 - **FR-022**: OpenAI-compatible LLM profiles MUST support custom Base URL.
 - **FR-023**: MCP stdio server configuration MUST support environment variables.
+- **FR-024**: The plugin MUST support a Kimi CodingPlan LLM profile that uses the fixed `https://api.kimi.com/coding` endpoint and the Anthropic Messages wire format.
 
 ### Key Entities *(include if feature involves data)*
 

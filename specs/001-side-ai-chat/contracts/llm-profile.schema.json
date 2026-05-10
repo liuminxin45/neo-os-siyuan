@@ -4,11 +4,11 @@
   "title": "LLMProfile",
   "type": "object",
   "additionalProperties": false,
-  "required": ["id", "name", "provider", "apiKey", "model", "createdAt", "updatedAt"],
+  "required": ["id", "name", "provider", "model", "createdAt", "updatedAt"],
   "properties": {
     "id": { "type": "string", "minLength": 1 },
     "name": { "type": "string", "minLength": 1 },
-    "provider": { "enum": ["openai-compatible", "deepseek"] },
+    "provider": { "enum": ["openai-compatible", "deepseek", "kimi-coding-plan"] },
     "baseUrl": { "type": "string" },
     "apiKey": { "type": "string", "minLength": 1 },
     "model": { "type": "string", "minLength": 1 },
@@ -25,6 +25,17 @@
       },
       "then": {
         "required": ["baseUrl"]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "provider": { "enum": ["deepseek", "openai-compatible", "kimi-coding-plan"] }
+        },
+        "required": ["provider"]
+      },
+      "then": {
+        "required": ["apiKey"]
       }
     }
   ]

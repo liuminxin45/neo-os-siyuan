@@ -24,25 +24,26 @@ npm run build
 4. Open the settings modal from the chat Dock.
 5. Add one DeepSeek profile with API key and model.
 6. Add one OpenAI-compatible profile with name, Base URL, API key, and model.
-7. Switch the active profile and confirm the selected profile is visible from the chat surface.
-8. Add one MCP stdio server with command, optional args, and env values.
-9. Validate the stdio server and confirm at least one tool can be discovered in Siyuan desktop.
-10. Add one MCP SSE URL server.
-11. Add one MCP Streamable HTTP URL server.
-12. Validate or connect MCP servers and confirm tool discovery or validation status is visible for both HTTP transport styles.
-13. Send a normal chat message with Enter.
-14. Confirm Shift+Enter inserts a newline instead of sending.
-15. Send a prompt that should trigger an MCP tool.
-16. Confirm the chat shows tool name plus status without asking for confirmation.
-17. Confirm tool result content is not displayed in the chat UI.
-18. Start another generation and click stop generation.
-19. If an MCP tool call is active, confirm it is marked stopped or ignored when late output returns.
-20. Confirm generation stops and the input returns to an editable state.
-21. Clear the chat.
-22. Reload the plugin.
-23. Confirm chat messages are gone.
-24. Confirm LLM and MCP settings remain.
-25. Confirm the assistant never reads or displays current Siyuan document context.
+7. Add one Kimi CodingPlan profile with API key and model; confirm the endpoint is fixed to `https://api.kimi.com/coding`.
+9. Switch the active profile and confirm the selected profile is visible from the chat surface.
+10. Add one MCP stdio server with command, optional args, and env values.
+11. Validate the stdio server and confirm at least one tool can be discovered in Siyuan desktop.
+12. Add one MCP SSE URL server.
+13. Add one MCP Streamable HTTP URL server.
+14. Validate or connect MCP servers and confirm tool discovery or validation status is visible for both HTTP transport styles.
+15. Send a normal chat message with Enter.
+16. Confirm Shift+Enter inserts a newline instead of sending.
+17. Send a prompt that should trigger an MCP tool.
+18. Confirm the chat shows tool name plus status without asking for confirmation.
+19. Confirm tool result content is not displayed in the chat UI.
+20. Start another generation and click stop generation.
+21. If an MCP tool call is active, confirm it is marked stopped or ignored when late output returns.
+22. Confirm generation stops and the input returns to an editable state.
+23. Clear the chat.
+24. Reload the plugin.
+25. Confirm chat messages are gone.
+26. Confirm LLM and MCP settings remain.
+27. Confirm the assistant never reads or displays current Siyuan document context.
 
 ## Validation Notes
 
@@ -56,6 +57,7 @@ npm run build
 - Settings modal manages multiple LLM profiles and MCP servers.
 - DeepSeek setup only requires API key and model.
 - OpenAI-compatible setup supports custom Base URL.
+- Kimi CodingPlan setup uses a fixed coding endpoint and Anthropic Messages transport.
 - MCP discovery and automatic tool-call status work.
 - Stdio MCP feasibility has been proven in Siyuan desktop or implementation has paused for re-planning.
 - Chat history is session-only.

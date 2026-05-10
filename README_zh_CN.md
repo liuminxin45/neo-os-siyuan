@@ -8,6 +8,7 @@
 - 多个 LLM Profile。
 - OpenAI-compatible Provider，支持自定义 Base URL。
 - DeepSeek 简化配置，只需要 API Key 和模型名。
+- Kimi CodingPlan，固定使用 `https://api.kimi.com/coding`。
 - MCP Server 配置，支持 stdio、SSE URL、Streamable HTTP URL。
 - MCP 工具发现和可信自动调用。
 - 聊天中显示工具名称和调用状态。

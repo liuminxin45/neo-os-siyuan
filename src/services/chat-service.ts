@@ -96,56 +96,61 @@ export class ChatService {
 
     try {
       const tools = this.options.mcpService.getTools();
-      const first = await streamChatCompletion(profile, this.session.messages, {
+      let latest = await streamChatCompletion(profile, this.session.messages, {
         signal: this.abortController.signal,
         tools,
         onText: (chunk) => this.appendAssistantChunk(assistantMessage.id, chunk, generationId),
       });
 
       const toolResults: McpToolCall[] = [];
-      for (const request of first.toolRequests) {
-        if (this.session.generationId !== generationId || !this.session.isGenerating) break;
-        const tool = tools.find((candidate) => candidate.llmName === request.name);
-        if (!tool) continue;
-        const pendingCall: McpToolCall = {
-          id: request.id || createId("tool"),
-          serverId: tool.serverId,
-          toolName: tool.name,
-          llmName: tool.llmName,
-          status: "running",
-          startedAt: nowIso(),
-          argumentsSummary: JSON.stringify(request.arguments),
-        };
-        this.session.toolCalls = [...this.session.toolCalls, pendingCall];
-        this.session.messages = [
-          ...this.session.messages,
-          {
-            id: createId("msg"),
-            role: "tool-status",
-            content: `${tool.name}：调用中`,
-            createdAt: nowIso(),
-            status: "pending",
-            toolCallId: pendingCall.id,
-          },
-        ];
-        this.emit();
-        const result = await this.options.mcpService.callTool(tool, request.arguments, this.session.generationId || "");
-        const matchedResult = { ...result, id: pendingCall.id };
-        const finalResult =
-          this.session.generationId === generationId ? matchedResult : { ...matchedResult, status: "stopped" as const };
-        toolResults.push(finalResult);
-        this.updateToolCall(finalResult);
-      }
-
-      if (toolResults.length > 0 && this.session.generationId === generationId && this.session.isGenerating) {
-        const followup = await streamChatCompletion(profile, this.session.messages, {
+      const maxToolRounds = 4;
+      for (let round = 0; round < maxToolRounds && latest.toolRequests.length > 0; round += 1) {
+        const roundResults: McpToolCall[] = [];
+        for (const request of latest.toolRequests) {
+          if (this.session.generationId !== generationId || !this.session.isGenerating) break;
+          const tool = tools.find((candidate) => candidate.llmName === request.name);
+          if (!tool) continue;
+          const pendingCall: McpToolCall = {
+            id: request.id || createId("tool"),
+            serverId: tool.serverId,
+            toolName: tool.name,
+            llmName: tool.llmName,
+            status: "running",
+            startedAt: nowIso(),
+            argumentsSummary: JSON.stringify(request.arguments),
+          };
+          this.session.toolCalls = [...this.session.toolCalls, pendingCall];
+          this.session.messages = [
+            ...this.session.messages,
+            {
+              id: createId("msg"),
+              role: "tool-status",
+              content: `${tool.name}：调用中`,
+              createdAt: nowIso(),
+              status: "pending",
+              toolCallId: pendingCall.id,
+            },
+          ];
+          this.emit();
+          const result = await this.options.mcpService.callTool(tool, request.arguments, this.session.generationId || "");
+          const matchedResult = { ...result, id: pendingCall.id };
+          const finalResult =
+            this.session.generationId === generationId ? matchedResult : { ...matchedResult, status: "stopped" as const };
+          roundResults.push(finalResult);
+          this.updateToolCall(finalResult);
+        }
+        if (roundResults.length === 0 || this.session.generationId !== generationId || !this.session.isGenerating) break;
+        toolResults.push(...roundResults);
+        latest = await streamChatCompletion(profile, this.session.messages, {
           signal: this.abortController.signal,
+          tools,
           toolResults,
           onText: (chunk) => this.appendAssistantChunk(assistantMessage.id, chunk, generationId),
         });
-        if (!followup.content && !first.content) {
-          this.appendAssistantChunk(assistantMessage.id, "工具调用已完成。", generationId);
-        }
+      }
+
+      if (!latest.content && toolResults.length > 0) {
+        this.appendAssistantChunk(assistantMessage.id, "工具调用已完成。", generationId);
       }
       this.finishAssistant(assistantMessage.id, generationId);
     } catch (error) {

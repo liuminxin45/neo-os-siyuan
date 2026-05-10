@@ -66,7 +66,18 @@ export class ChatDock {
     }
     session.messages.forEach((message) => {
       const item = createElement("article", `siyuan-addon-message siyuan-addon-message--${message.role}`);
-      const meta = createElement("div", "siyuan-addon-message__meta", this.metaText(message.role, message.status));
+      const meta = createElement("div", "siyuan-addon-message__meta");
+      meta.append(createElement("span", "", this.metaText(message.role, message.status)));
+      const messageActions = createElement("div", "siyuan-addon-message__actions");
+      const copy = createElement("button", "siyuan-addon-message__button", "复制");
+      copy.type = "button";
+      copy.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        void this.copyText(message.content);
+      });
+      messageActions.append(copy);
+      meta.append(messageActions);
       const content = createElement("div", "siyuan-addon-message__content", message.content);
       item.append(meta, content);
       messages.append(item);
@@ -118,4 +129,20 @@ export class ChatDock {
     const statusText = status === "streaming" ? "生成中" : status === "error" ? "失败" : status === "stopped" ? "已停止" : "";
     return [roleText, statusText].filter(Boolean).join(" · ");
   }
+
+  private async copyText(value: string): Promise<void> {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(value);
+      return;
+    }
+    const textarea = document.createElement("textarea");
+    textarea.value = value;
+    textarea.style.position = "fixed";
+    textarea.style.left = "-9999px";
+    document.body.append(textarea);
+    textarea.select();
+    document.execCommand("copy");
+    textarea.remove();
+  }
+
 }
