@@ -80,6 +80,16 @@ const actionThought = (step: ReActStep): string => {
 const observationSummary = (call: McpToolCall): string =>
   call.status === "success" ? call.outputSummary || "工具调用成功" : call.error || call.status;
 
+const DUPLICATE_GUARD_PREFIX = "REACT_DUPLICATE_GUARD:";
+const REPEAT_GUARD_PREFIX = "REACT_REPEAT_GUARD:";
+
+interface ToolCallRecord {
+  count: number;
+  status: McpToolCall["status"];
+  summary: string;
+  workspaceVersion: number;
+}
+
 const syntheticHistoryMessage = (content: string): ChatMessage => ({
   id: createId("msg"),
   role: "user",
@@ -96,6 +106,7 @@ const formatReActHistoryEntry = (step: ReActStep): string => {
     ? step.observations.map((observation) => `${observation.status}：${observation.summary}`).join("\n")
     : "无";
   const usedHelp = step.actions.some((action) => /"action"\s*:\s*"help"/.test(action.argumentsSummary));
+  const skippedDuplicate = step.observations.some((observation) => observation.summary.startsWith(DUPLICATE_GUARD_PREFIX));
   return [
     "ReAct 历史：",
     `第 ${step.round} 轮`,
@@ -104,6 +115,7 @@ const formatReActHistoryEntry = (step: ReActStep): string => {
     `Observation：${observations}`,
     "下一步必须基于上述 Observation 继续推理；不要忽略已经返回的工具结果。",
     usedHelp ? "注意：help 已经返回工具用法，下一轮不要重复 help；请改用具体 action 和必填参数，或在信息足够时给出最终回答。" : "",
+    skippedDuplicate ? "注意：重复工具调用已被跳过。不要因此直接结束；请改用其它参数、其它候选目标或其它工具继续完成用户目标。" : "",
   ]
     .filter(Boolean)
     .join("\n");
@@ -115,6 +127,205 @@ const actionValuesForTool = (tool: McpTool): string[] => {
 };
 
 const isHelpArgs = (args: Record<string, unknown>): boolean => args.action === "help";
+
+const stableJson = (value: unknown): string => {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
+  if (typeof value === "object" && value !== null) {
+    return `{${Object.keys(value as Record<string, unknown>)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${stableJson((value as Record<string, unknown>)[key])}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value);
+};
+
+const toolCallSignature = (tool: McpTool, args: Record<string, unknown>): string => `${tool.llmName}:${stableJson(args)}`;
+
+const searchIntentSignature = (tool: McpTool, args: Record<string, unknown>): string | undefined => {
+  const action = typeof args.action === "string" ? args.action : "";
+  const query = typeof args.query === "string" ? args.query.trim() : "";
+  if (action !== "search" || !query) return undefined;
+  const path = typeof args.path === "string" ? args.path.trim() || "/" : "/";
+  return `${tool.llmName}:search:${path}:${query}`;
+};
+
+const readIntentSignature = (tool: McpTool, args: Record<string, unknown>): string | undefined => {
+  const action = typeof args.action === "string" ? args.action : "";
+  if (action !== "read" && action !== "get_doc") return undefined;
+  const target =
+    typeof args.path === "string"
+      ? args.path.trim()
+      : typeof args.id === "string"
+        ? args.id.trim()
+        : "";
+  return target ? `${tool.llmName}:${action}:${target}` : undefined;
+};
+
+const MUTATING_ACTIONS = new Set([
+  "write",
+  "replace",
+  "rm",
+  "mv",
+  "create",
+  "rename",
+  "remove",
+  "move",
+  "set_attr",
+  "set_conf",
+  "set_icon",
+  "set_open_state",
+  "set_permission",
+  "find_replace",
+  "duplicate",
+  "heading_to_doc",
+  "doc_to_heading",
+  "create_daily_note",
+]);
+
+const isMutatingCall = (args: Record<string, unknown>): boolean =>
+  typeof args.action === "string" && MUTATING_ACTIONS.has(args.action);
+
+const writeBodyFromArgs = (args: Record<string, unknown>): string =>
+  [args.markdown, args.content, args.body, args.text, args.new]
+    .filter((value): value is string => typeof value === "string")
+    .join("\n")
+    .trim();
+
+const isSelectedSkillGoal = (goal: string): boolean => /已选 skill：/.test(goal);
+
+const hasWorkspaceMutationIntent = (goal: string): boolean =>
+  /记下|记录|保存|写入|创建|新增|更新|归档|摄入|导入|蒸馏|提炼|distill|ingest|write|save|record|create|update/i.test(goal);
+
+const requiresSuccessfulMutation = (goal: string): boolean =>
+  isSelectedSkillGoal(goal) && hasWorkspaceMutationIntent(goal);
+
+const hasSuccessfulMutation = (toolResults: McpToolCall[]): boolean =>
+  toolResults.some((result) => result.status === "success" && isMutatingCall(parseArgumentSummary(result.argumentsSummary || "{}")));
+
+const stepHasSuccessfulMutation = (step: ReActStep): boolean =>
+  step.actions.some((action) => {
+    const args = parseArgumentSummary(action.argumentsSummary);
+    return isMutatingCall(args) && step.observations.some((observation) => observation.status === "success");
+  });
+
+const requiredGoalMarkers = (goal: string): string[] => {
+  const markers = new Set<string>();
+  const date = goal.match(/\d{4}年\d{1,2}月\d{1,2}/)?.[0] || goal.match(/\d{4}-\d{1,2}-\d{1,2}/)?.[0];
+  if (date) markers.add(date);
+  for (const match of goal.matchAll(/[A-Za-z][A-Za-z0-9_-]{2,}(?:\s+[A-Za-z][A-Za-z0-9_-]{2,})*/g)) {
+    const value = match[0].trim();
+    if (!/skill|write|save|record|mcp/i.test(value)) markers.add(value);
+  }
+  return [...markers].slice(0, 3);
+};
+
+const mutationContentError = (args: Record<string, unknown>, userGoal: string): string | undefined => {
+  if (args.action !== "write" && args.action !== "replace" && args.action !== "create") return undefined;
+  const path = typeof args.path === "string" ? args.path.trim() : "";
+  const body = writeBodyFromArgs(args);
+  if (args.action === "write" && path.endsWith("/")) {
+    return "写入文档时 path 不能以 / 结尾。用户给的是目录时，必须在该目录下补一个明确文档名，例如 /LLM-Wiki/wiki/memory/insights/<文档标题>。";
+  }
+  if (!body) {
+    return "写入类 MCP 调用不能使用空内容。请把用户要保存的事实写入 markdown/content 后再调用。";
+  }
+  const missing = requiredGoalMarkers(userGoal).filter((marker) => !body.includes(marker));
+  if (missing.length > 0) {
+    return `写入内容缺少用户目标中的关键信息：${missing.join(", ")}。不要写通用模板，必须保存用户明确给出的事实。`;
+  }
+  return undefined;
+};
+
+const isRetryableSummary = (summary: string): boolean =>
+  /retry|timeout|temporar|closed-or-initializing|initializing|rate limit|429|5\d\d|稍后|重试|初始化|超时|暂时/i.test(summary);
+
+const toolGuardReason = (
+  tool: McpTool,
+  args: Record<string, unknown>,
+  exactRecords: Map<string, ToolCallRecord>,
+  currentStepSignatures: Set<string>,
+  searchIntentCounts: Map<string, number>,
+  readIntentCounts: Map<string, number>,
+  workspaceVersion: number,
+): string | undefined => {
+  const signature = toolCallSignature(tool, args);
+  if (currentStepSignatures.has(signature)) {
+    return `${DUPLICATE_GUARD_PREFIX} 已跳过同一轮内完全相同的重复工具调用 ${tool.llmName} ${summarizeJson(args, 240)}。这不代表任务失败；请阅读已有 Observation，改用其它参数/其它目标继续，或在信息足够时给出最终回答。`;
+  }
+
+  const previous = exactRecords.get(signature);
+  if (previous && previous.workspaceVersion === workspaceVersion) {
+    if (previous.status === "success") {
+      return `${DUPLICATE_GUARD_PREFIX} 相同工具调用此前已经成功：${tool.llmName} ${summarizeJson(args, 240)}。请直接使用已有 Observation，不要重复读取同一结果。`;
+    }
+    if (!isRetryableSummary(previous.summary)) {
+      return `${DUPLICATE_GUARD_PREFIX} 相同工具调用此前已经返回不可重试结果：${previous.summary}。请换目标、换参数、换工具，或向用户说明限制。`;
+    }
+    if (previous.count >= 2) {
+      return `${DUPLICATE_GUARD_PREFIX} 相同工具调用已因可重试错误尝试过 ${previous.count} 次：${previous.summary}。请换目标、换参数、换工具，或向用户说明限制。`;
+    }
+  }
+
+  const searchSignature = searchIntentSignature(tool, args);
+  if (searchSignature && (searchIntentCounts.get(searchSignature) || 0) >= 3) {
+    return `${REPEAT_GUARD_PREFIX} 已经围绕同一个 search 查询反复检索 3 次以上：${summarizeJson(args, 240)}。这属于无进展检索。请停止分页/扩大 pageSize，改用已有结果中的具体 path 读取，或明确说明无法唯一确定。`;
+  }
+
+  const readSignature = readIntentSignature(tool, args);
+  if (readSignature && (readIntentCounts.get(readSignature) || 0) > 0) {
+    return `${REPEAT_GUARD_PREFIX} 已经读取过同一个目标：${summarizeJson(args, 240)}。不要通过修改 page/pageSize 或换工具重复读取；请基于已读内容给出最终回答。`;
+  }
+
+  return undefined;
+};
+
+const rememberToolCallAttempt = (
+  tool: McpTool,
+  args: Record<string, unknown>,
+  currentStepSignatures: Set<string>,
+  searchIntentCounts: Map<string, number>,
+  readIntentCounts: Map<string, number>,
+): void => {
+  const signature = toolCallSignature(tool, args);
+  currentStepSignatures.add(signature);
+  const searchSignature = searchIntentSignature(tool, args);
+  if (searchSignature) {
+    searchIntentCounts.set(searchSignature, (searchIntentCounts.get(searchSignature) || 0) + 1);
+  }
+  const readSignature = readIntentSignature(tool, args);
+  if (readSignature) {
+    readIntentCounts.set(readSignature, (readIntentCounts.get(readSignature) || 0) + 1);
+  }
+};
+
+const rememberToolCallResult = (
+  tool: McpTool,
+  args: Record<string, unknown>,
+  result: McpToolCall,
+  exactRecords: Map<string, ToolCallRecord>,
+  workspaceVersion: number,
+): void => {
+  const signature = toolCallSignature(tool, args);
+  const previous = exactRecords.get(signature);
+  exactRecords.set(signature, {
+    count: (previous?.count || 0) + 1,
+    status: result.status,
+    summary: observationSummary(result),
+    workspaceVersion,
+  });
+};
+
+const stepHitRepeatGuard = (step: ReActStep): boolean =>
+  step.observations.some((observation) => observation.summary.startsWith(REPEAT_GUARD_PREFIX));
+
+const stepHasSuccessfulRead = (step: ReActStep): boolean =>
+  step.actions.some((action) => {
+    const args = parseArgumentSummary(action.argumentsSummary);
+    return (args.action === "read" || args.action === "get_doc") && step.observations.some((observation) => observation.status === "success");
+  });
+
+const shouldFinalizeAfterRead = (step: ReActStep, userGoal: string, toolResults: McpToolCall[]): boolean =>
+  stepHasSuccessfulRead(step) && (!requiresSuccessfulMutation(userGoal) || hasSuccessfulMutation(toolResults));
 
 const preflightToolArgs = (
   tool: McpTool,
@@ -143,6 +354,10 @@ const preflightToolArgs = (
   const missing = required.filter((field) => args[field] === undefined);
   if (missing.length > 0) {
     return `工具 ${tool.llmName} 缺少必填参数：${missing.join(", ")}。`;
+  }
+  if (requiresSuccessfulMutation(options.userGoal)) {
+    const mutationError = mutationContentError(args, options.userGoal);
+    if (mutationError) return mutationError;
   }
   return undefined;
 };
@@ -224,6 +439,41 @@ const syntheticToolError = (tool: McpTool, args: Record<string, unknown>, messag
   error: message,
 });
 
+const syntheticToolSkipped = (tool: McpTool, args: Record<string, unknown>, message: string): McpToolCall => ({
+  id: createId("tool"),
+  serverId: tool.serverId,
+  toolName: tool.name,
+  llmName: tool.llmName,
+  status: "stopped",
+  startedAt: nowIso(),
+  finishedAt: nowIso(),
+  argumentsSummary: summarizeJson(args, 240),
+  error: message,
+});
+
+const finalAnswerFromHistory = async (
+  profile: LlmProfile,
+  runtimeMessages: ChatMessage[],
+  signal: AbortSignal | undefined,
+  reason: string,
+): Promise<string> => {
+  const prompt = syntheticHistoryMessage(
+    [
+      reason,
+      "现在禁止继续调用工具。请只基于上面的对话与 ReAct 历史给出最终回答。",
+      "如果上一轮对话或 Observation 已经出现明确 path，就说明应读取哪个文档或给出当前可判断的内容。",
+      "如果无法唯一确定，就直接说无法唯一确定，并列出最可能的候选路径；不要再次建议泛搜同一个关键词。",
+    ].join("\n"),
+  );
+  const result = await streamChatCompletion(profile, [...runtimeMessages, prompt], {
+    signal,
+    tools: [],
+    systemPrompt: "你是 ReAct Agent 的最终回答器。禁止调用工具，禁止输出工具调用，只能给用户一个简洁、可执行的最终回答。",
+    onText: () => undefined,
+  });
+  return result.content.trim() || "已停止重复工具调用；当前信息不足以继续自动打开文档。";
+};
+
 export class AgentRuntime {
   async run(input: AgentRuntimeInput, handlers: AgentRuntimeHandlers): Promise<AgentRuntimeResult> {
     const mode = normalizeAgentMode(input.mode) || DEFAULT_AGENT_MODE;
@@ -238,6 +488,10 @@ export class AgentRuntime {
     const reactHistory = [...(input.continuation?.reactHistory || [])];
     const runtimeMessages = [...input.messages, ...reactHistory.map(syntheticHistoryMessage)];
     const userGoal = latestUserGoal(input.messages);
+    const exactToolCallRecords = new Map<string, ToolCallRecord>();
+    const searchIntentCounts = new Map<string, number>();
+    const readIntentCounts = new Map<string, number>();
+    let workspaceVersion = 0;
     const helpedTools = new Set(
       toolResults
         .filter((result) => result.status === "success" && result.argumentsSummary && /"action"\s*:\s*"help"/.test(result.argumentsSummary))
@@ -252,6 +506,7 @@ export class AgentRuntime {
     });
 
     for (let segmentRound = 0; segmentRound < REACT_SEGMENT_ROUNDS; segmentRound += 1) {
+      const currentStepSignatures = new Set<string>();
       completedRounds += 1;
       const step: ReActStep = {
         id: createId("react"),
@@ -263,6 +518,23 @@ export class AgentRuntime {
       };
 
       if (latest.toolRequests.length === 0) {
+        if (requiresSuccessfulMutation(userGoal) && !hasSuccessfulMutation(toolResults)) {
+          runtimeMessages.push(
+            syntheticHistoryMessage(
+              [
+                "执行约束未满足：用户选择了 skill，并且目标包含记录/写入意图，但当前还没有任何成功的 MCP 写入类调用。",
+                "不能直接说“已记录”或“已保存”。必须继续通过 MCP 工具完成实际写入。",
+                "优先使用 fs.write / fs.replace / create 等可用写入动作；如果无法确定写入路径，先通过 MCP 读取 skill 或目录结构，再写入合适位置；如果工具无法写入，明确说明失败原因。",
+              ].join("\n"),
+            ),
+          );
+          latest = await streamChatCompletion(input.profile, runtimeMessages, {
+            signal: input.signal,
+            tools: input.tools,
+            onText: () => undefined,
+          });
+          continue;
+        }
         handlers.onStep({ ...step, status: "complete" });
         handlers.onText(latest.content);
         return { status: "final", content: latest.content, toolResults, completedRounds, reactHistory };
@@ -288,14 +560,30 @@ export class AgentRuntime {
           toolName: tool.llmName,
           argumentsSummary: argsSummary,
         });
-        const preflightError = preflightToolArgs(tool, effectiveArguments, {
+        const guardError = toolGuardReason(
+          tool,
+          effectiveArguments,
+          exactToolCallRecords,
+          currentStepSignatures,
+          searchIntentCounts,
+          readIntentCounts,
+          workspaceVersion,
+        );
+        rememberToolCallAttempt(tool, effectiveArguments, currentStepSignatures, searchIntentCounts, readIntentCounts);
+        const preflightError = guardError || preflightToolArgs(tool, effectiveArguments, {
           helpAlreadyObserved: helpedTools.has(tool.llmName),
           userGoal,
         });
         const result = preflightError
-          ? syntheticToolError(tool, effectiveArguments, preflightError)
+          ? preflightError.startsWith(DUPLICATE_GUARD_PREFIX)
+            ? syntheticToolSkipped(tool, effectiveArguments, preflightError)
+            : syntheticToolError(tool, effectiveArguments, preflightError)
           : await handlers.callTool(tool, effectiveArguments);
         const finalResult = { ...result, id: pending.id };
+        if (finalResult.status === "success" && isMutatingCall(effectiveArguments)) {
+          workspaceVersion += 1;
+        }
+        rememberToolCallResult(tool, effectiveArguments, finalResult, exactToolCallRecords, workspaceVersion);
         toolResults.push(finalResult);
         if (finalResult.status === "success" && isHelpArgs(effectiveArguments)) {
           helpedTools.add(tool.llmName);
@@ -314,6 +602,37 @@ export class AgentRuntime {
       const historyEntry = formatReActHistoryEntry(step);
       reactHistory.push(historyEntry);
       runtimeMessages.push(syntheticHistoryMessage(historyEntry));
+
+      if (stepHitRepeatGuard(step)) {
+        const guardReason =
+          step.observations.find((observation) => observation.summary.startsWith(REPEAT_GUARD_PREFIX))?.summary ||
+          "检测到重复工具调用。";
+        const content = await finalAnswerFromHistory(input.profile, runtimeMessages, input.signal, guardReason);
+        handlers.onText(content);
+        return { status: "final", content, toolResults, completedRounds, reactHistory };
+      }
+
+      if (requiresSuccessfulMutation(userGoal) && stepHasSuccessfulMutation(step)) {
+        const content = await finalAnswerFromHistory(
+          input.profile,
+          runtimeMessages,
+          input.signal,
+          "已经观察到成功的 MCP 写入类调用。现在必须停止继续写入或查询，只基于写入结果给用户确认保存位置和保存内容摘要。",
+        );
+        handlers.onText(content);
+        return { status: "final", content, toolResults, completedRounds, reactHistory };
+      }
+
+      if (shouldFinalizeAfterRead(step, userGoal, toolResults)) {
+        const content = await finalAnswerFromHistory(
+          input.profile,
+          runtimeMessages,
+          input.signal,
+          "已经成功读取到用户要求查看的文档内容。现在应基于已读内容直接回答，不要继续调用工具。",
+        );
+        handlers.onText(content);
+        return { status: "final", content, toolResults, completedRounds, reactHistory };
+      }
 
       if (segmentRound === REACT_SEGMENT_ROUNDS - 1) {
         return {

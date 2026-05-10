@@ -75,6 +75,12 @@ const createLlmToolName = (server: McpServerConfig, toolName: string): string =>
 const isMcpErrorResult = (result: unknown): boolean =>
   typeof result === "object" && result !== null && (result as { isError?: unknown }).isError === true;
 
+const summarizeToolResult = (tool: McpTool, args: Record<string, unknown>, result: unknown): string => {
+  const action = typeof args.action === "string" ? args.action : "";
+  const limit = action === "read" || action === "get_doc" ? 12000 : action === "fulltext" || action === "search" ? 5000 : 2000;
+  return summarizeJson(result, limit);
+};
+
 export class McpService {
   private connections = new Map<string, ConnectedMcpServer>();
   private tools = new Map<string, McpTool[]>();
@@ -126,7 +132,7 @@ export class McpService {
       if (isMcpErrorResult(result)) {
         return { ...call, status: "error", finishedAt: nowIso(), error: summarizeJson(result, 800) || "MCP 工具返回错误" };
       }
-      return { ...call, status: "success", finishedAt: nowIso(), outputSummary: summarizeJson(result, 800) };
+      return { ...call, status: "success", finishedAt: nowIso(), outputSummary: summarizeToolResult(tool, args, result) };
     } catch (error) {
       return { ...call, status: "error", finishedAt: nowIso(), error: safeErrorText(error) };
     }

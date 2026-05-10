@@ -23,6 +23,7 @@
         "items": { "$ref": "./mcp-tool.schema.json" }
       }
     },
-    "agentMode": { "enum": ["react", "reflection", "plan-and-execute"] }
+    "agentMode": { "enum": ["react", "reflection", "plan-and-execute"] },
+    "maxMemoryTurns": { "enum": [5, 10, 20, 30] }
   }
 }
