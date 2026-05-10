@@ -22,6 +22,7 @@
         "type": "array",
         "items": { "$ref": "./mcp-tool.schema.json" }
       }
-    }
+    },
+    "agentMode": { "enum": ["react", "reflection", "plan-and-execute"] }
   }
 }

@@ -27,6 +27,7 @@ export default class SiyuanAddonPlugin extends Plugin {
         const settings = this.settingsStore?.get();
         return settings ? getActiveProfile(settings.llmProfiles, settings.activeProfileId) : undefined;
       },
+      getAgentMode: () => this.settingsStore?.get().agentMode,
     });
     this.chatDock = new ChatDock({
       chatService: this.chatService,
