@@ -57,12 +57,19 @@ const anthropicEndpointForProfile = (profile: LlmProfile): string => {
   return `${trimmed}/v1/messages`;
 };
 
-const toWireMessages = (messages: ChatMessage[], toolResults: McpToolCall[] = []): LlmWireMessage[] => {
+const toWireMessages = (
+  messages: ChatMessage[],
+  toolResults: McpToolCall[] = [],
+  tools: McpTool[] = [],
+): LlmWireMessage[] => {
+  const toolNames = tools.map((tool) => tool.llmName).join(", ");
+  const toolHint = toolNames
+    ? `当前可调用的 MCP tools.name：${toolNames}。本插件主要用于思源笔记工作区，用户即使没有明确说“使用 MCP”，只要问题涉及笔记本、文档、块、数据库、标签、文件、搜索、当前工作区内容、笔记内容或需要查询/读取/遍历/统计思源里的信息，就应优先查看可用工具的 description 和 input_schema，自主选择合适 MCP 工具并用结构化工具调用协议执行。只有纯常识、写作、解释或无需工作区数据的问题才直接回答。不要在正文中输出 XML、伪标签或未出现在 tools.name 中的工具名。`
+    : "当前没有可调用的 MCP tools；如果用户请求涉及思源工作区数据，应明确说明没有可用 MCP 工具，不要在正文中伪造工具调用标签。";
   const wire: LlmWireMessage[] = [
     {
       role: "system",
-      content:
-        "你是思源笔记里的个人 AI 助手。当前版本不能读取思源文档上下文。可以根据需要自动调用已启用的 MCP 工具。",
+      content: `你是思源笔记里的个人 AI 助手。你应主动判断用户意图，并在需要查询、读取或操作思源工作区数据时优先使用 MCP 工具。${toolHint}`,
     },
   ];
   for (const message of messages) {
@@ -88,12 +95,12 @@ const toAnthropicWireMessages = (
   toolResults: McpToolCall[] = [],
   tools: McpTool[] = [],
 ): LlmWireMessage[] => {
-  const wire = toWireMessages(messages, toolResults);
+  const wire = toWireMessages(messages, toolResults, tools);
   const system = wire[0];
   if (system?.role === "system") {
     const toolNames = tools.map((tool) => tool.llmName).join(", ");
     const toolHint = toolNames
-      ? `\n当前可用 MCP 工具名必须完全按 tools.name 使用：${toolNames}。请根据每个工具的 description 和 input_schema 自行选择工具与参数，不要编造未出现在 tools.name 中的工具名。`
+      ? `\n当前可用 MCP 工具名必须完全按 tools.name 使用：${toolNames}。请根据每个工具的 description 和 input_schema 自行判断用户意图、选择工具与参数。用户没有明确说 MCP 时，只要问题需要思源工作区数据，也要优先调用合适工具。不要编造未出现在 tools.name 中的工具名。`
       : "";
     system.content = `${system.content}\nKimi CodingPlan 必须使用 Anthropic Messages 的结构化 tools/tool_use 协议调用工具。不要在正文中输出 <function_calls>、<invoke> 或 <antThinking> 标签。${toolHint}`;
   }
@@ -187,6 +194,45 @@ const resolveLegacyToolCall = (
   return { name: rawName, arguments: rawArgs };
 };
 
+const wordTokens = (value: string): string[] =>
+  value
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .split(/[^a-zA-Z0-9]+/)
+    .map((token) => token.toLowerCase())
+    .filter(Boolean)
+    .map((token) => (token.endsWith("s") ? token.slice(0, -1) : token));
+
+const actionValuesForTool = (tool: McpTool): string[] => {
+  const action = (tool.inputSchema?.properties as Record<string, unknown> | undefined)?.action as
+    | { enum?: unknown[] }
+    | undefined;
+  return Array.isArray(action?.enum) ? action.enum.filter((value): value is string => typeof value === "string") : [];
+};
+
+const normalizeAction = (value: string): string => wordTokens(value).join("");
+
+const resolveSchemaInferredToolCall = (
+  rawName: string,
+  rawArgs: Record<string, unknown>,
+  tools: McpTool[],
+): { name: string; arguments: Record<string, unknown> } | undefined => {
+  const rawTokens = wordTokens(rawName);
+  const candidates = tools.filter((tool) => rawTokens.includes(wordTokens(tool.name)[0] || ""));
+  if (candidates.length !== 1) return undefined;
+
+  const actionValues = actionValuesForTool(candidates[0]);
+  if (!actionValues.length) return { name: candidates[0].llmName, arguments: rawArgs };
+  const actionText = typeof rawArgs.action === "string" ? `${rawName} ${rawArgs.action}` : rawName;
+  const normalizedAction = normalizeAction(actionText);
+  const action = actionValues.find((value) => normalizeAction(value) === normalizedAction || normalizedAction.includes(normalizeAction(value)));
+  if (!action) return undefined;
+
+  return {
+    name: candidates[0].llmName,
+    arguments: { ...rawArgs, action },
+  };
+};
+
 const parseLegacyKimiToolCalls = (content: string, tools: McpTool[] = []): LlmToolRequest[] => {
   const block = content.match(/<function_calls>([\s\S]*?)<\/function_calls>/i)?.[1];
   if (!block) return [];
@@ -211,10 +257,33 @@ const parseLegacyKimiToolCalls = (content: string, tools: McpTool[] = []): LlmTo
   return requests;
 };
 
+const parseXmlJsonToolCalls = (content: string, tools: McpTool[] = []): LlmToolRequest[] => {
+  const requests: LlmToolRequest[] = [];
+  const tagPattern = /<([a-zA-Z][\w:-]*)>\s*(\{[\s\S]*?\})\s*<\/\1>/g;
+  let match: RegExpExecArray | null;
+  while ((match = tagPattern.exec(content))) {
+    const rawName = match[1];
+    let args: Record<string, unknown>;
+    try {
+      args = JSON.parse(match[2]) as Record<string, unknown>;
+    } catch {
+      continue;
+    }
+    const direct = resolveLegacyToolCall(rawName, args, tools);
+    const resolved =
+      direct.name === rawName ? resolveSchemaInferredToolCall(rawName, args, tools) || direct : direct;
+    if (tools.some((tool) => tool.llmName === resolved.name)) {
+      requests.push({ id: `tool_${requests.length}`, name: resolved.name, arguments: resolved.arguments });
+    }
+  }
+  return requests;
+};
+
 const stripLegacyKimiToolMarkup = (content: string): string =>
   content
     .replace(/<antThinking>[\s\S]*?<\/antThinking>/gi, "")
     .replace(/<function_calls>[\s\S]*?<\/function_calls>/gi, "")
+    .replace(/<([a-zA-Z][\w:-]*)>\s*\{[\s\S]*?\}\s*<\/\1>/g, "")
     .trim();
 
 const streamAnthropicMessages = async (
@@ -305,6 +374,7 @@ const streamAnthropicMessages = async (
         arguments: parseToolArgs(call.inputJson),
       })),
       ...parseLegacyKimiToolCalls(content, handlers.tools || []),
+      ...parseXmlJsonToolCalls(content, handlers.tools || []),
     ],
   };
 };
@@ -327,7 +397,7 @@ export const streamChatCompletion = async (
     },
     body: JSON.stringify({
       model: profile.model,
-      messages: toWireMessages(messages, handlers.toolResults || []),
+      messages: toWireMessages(messages, handlers.toolResults || [], handlers.tools || []),
       stream: true,
       tools: handlers.tools?.length ? toLlmTools(handlers.tools) : undefined,
       tool_choice: handlers.tools?.length ? "auto" : undefined,
@@ -369,7 +439,6 @@ export const streamChatCompletion = async (
         const delta = parsed.choices?.[0]?.delta;
         if (delta?.content) {
           content += delta.content;
-          handlers.onText(delta.content);
         }
         collectToolDelta(toolCalls, delta);
       }
@@ -378,14 +447,20 @@ export const streamChatCompletion = async (
     handlers.signal?.removeEventListener("abort", cancelReader);
   }
 
+  const visibleContent = stripLegacyKimiToolMarkup(content);
+  if (visibleContent) handlers.onText(visibleContent);
+
   return {
-    content,
-    toolRequests: toolCalls
-      .filter((call) => call.function.name)
-      .map((call) => ({
-        id: call.id,
-        name: call.function.name,
-        arguments: parseToolArgs(call.function.arguments),
-      })),
+    content: visibleContent,
+    toolRequests: [
+      ...toolCalls
+        .filter((call) => call.function.name)
+        .map((call) => ({
+          id: call.id,
+          name: call.function.name,
+          arguments: parseToolArgs(call.function.arguments),
+        })),
+      ...parseXmlJsonToolCalls(content, handlers.tools || []),
+    ],
   };
 };

@@ -18,6 +18,9 @@ const emptySession = (): ChatSession => ({
   generationId: undefined,
 });
 
+const looksLikeMcpRequest = (prompt: string): boolean =>
+  /\bmcp\b/i.test(prompt) || /工具|思源|笔记本|笔记|文档|数据库|块|标签|文件|搜索|遍历|读取|查询|当前工作区/.test(prompt);
+
 export class ChatService {
   private session: ChatSession = emptySession();
   private listeners = new Set<ChatListener>();
@@ -33,6 +36,10 @@ export class ChatService {
 
   snapshot(): ChatSession {
     return structuredClone(this.session);
+  }
+
+  refresh(): void {
+    this.emit();
   }
 
   clear(): void {
@@ -96,6 +103,11 @@ export class ChatService {
 
     try {
       const tools = this.options.mcpService.getTools();
+      if (tools.length === 0 && looksLikeMcpRequest(prompt)) {
+        this.appendAssistantChunk(assistantMessage.id, "当前没有可用的 MCP 工具，请先在设置中连接并发现 MCP 工具。", generationId);
+        this.finishAssistant(assistantMessage.id, generationId);
+        return;
+      }
       let latest = await streamChatCompletion(profile, this.session.messages, {
         signal: this.abortController.signal,
         tools,

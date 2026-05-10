@@ -63,7 +63,7 @@ export class SettingsModal {
         `API Key: ${maskSecret(profile.apiKey)}`,
       );
       info.append(masked);
-      const active = createElement("button", "b3-button b3-button--outline", profile.id === settings.activeProfileId ? "当前" : "设为当前");
+      const active = createElement("button", profile.id === settings.activeProfileId ? "b3-button b3-button--outline" : "b3-button", profile.id === settings.activeProfileId ? "当前" : "设为当前");
       active.addEventListener("click", async () => {
         await this.options.store.setLlmProfiles(settings.llmProfiles, profile.id);
         this.options.onSettingsChanged();
@@ -82,14 +82,23 @@ export class SettingsModal {
       list.append(row);
     });
 
-    const addDeepSeek = createElement("button", "b3-button", "新增 DeepSeek");
-    addDeepSeek.addEventListener("click", () => this.renderLlmForm(createEmptyLlmDraft("deepseek")));
-    const addOpenAi = createElement("button", "b3-button b3-button--outline", "新增 OpenAI Compatible");
-    addOpenAi.addEventListener("click", () => this.renderLlmForm(createEmptyLlmDraft("openai-compatible")));
-    const addKimi = createElement("button", "b3-button b3-button--outline", "新增 Kimi CodingPlan");
-    addKimi.addEventListener("click", () => this.renderLlmForm(createEmptyLlmDraft("kimi-coding-plan")));
     const actions = createElement("div", "siyuan-addon-actions");
-    actions.append(addDeepSeek, addOpenAi, addKimi);
+    const hasProvider = (provider: LlmProfile["provider"]): boolean => settings.llmProfiles.some((profile) => profile.provider === provider);
+    if (!hasProvider("deepseek")) {
+      const addDeepSeek = createElement("button", "b3-button b3-button--outline", "新增 DeepSeek");
+      addDeepSeek.addEventListener("click", () => this.renderLlmForm(createEmptyLlmDraft("deepseek")));
+      actions.append(addDeepSeek);
+    }
+    if (!hasProvider("openai-compatible")) {
+      const addOpenAi = createElement("button", "b3-button b3-button--outline", "新增 OpenAI Compatible");
+      addOpenAi.addEventListener("click", () => this.renderLlmForm(createEmptyLlmDraft("openai-compatible")));
+      actions.append(addOpenAi);
+    }
+    if (!hasProvider("kimi-coding-plan")) {
+      const addKimi = createElement("button", "b3-button b3-button--outline", "新增 Kimi CodingPlan");
+      addKimi.addEventListener("click", () => this.renderLlmForm(createEmptyLlmDraft("kimi-coding-plan")));
+      actions.append(addKimi);
+    }
     section.append(list, actions);
     return section;
   }
