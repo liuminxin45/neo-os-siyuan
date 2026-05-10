@@ -365,13 +365,20 @@ export class ChatService {
   private formatPrompt(content: string, skill?: SkillIndexItem): string {
     const userGoal = content.trim();
     if (!skill) return userGoal;
+    const normalizedSkillName = skill.name.trim().toLowerCase();
+    const normalizedSourcePath = skill.sourcePath.replace(/\\/g, "/").toLowerCase();
+    const autoIngestInstruction =
+      normalizedSkillName === "auto-ingest" || normalizedSourcePath.includes("/skills/auto-ingest/")
+        ? "auto-ingest 特别约束：这个 skill 基于 SiYuan Sisyphus MCP 执行。需要摄入、整理、归档或写入知识时，必须用 MCP fs 读取完整 skill 文档，然后按其流程先写 /LLM-Wiki/raw/sources/auto-ingest/ 原始备份，再写 /LLM-Wiki/wiki/ 下的结构化文档，并用 MCP 读回验证。不要写入本地产品仓库或假设已有文件系统权限。"
+        : "";
     return [
       `用户目标：${userGoal || "用户尚未提供具体目标，请先追问澄清。"}`,
       `已选 skill：${skill.name}`,
       `skill 简述：${skill.summary || "暂无简述"}`,
       `skill 索引路径：${skill.sourcePath}`,
-      "约束：除 skill 名称和简述外，其它信息必须通过 MCP 获取或写入。你必须先理解用户真实意图；目标不清楚时先追问；需要读取完整 skill、工作区内容、/runs 运行记录或写入任何内容时，必须调用可用 MCP 工具完成，不要假设插件已经读取过这些内容。只有观察到成功的 MCP 写入类调用后，才可以说已经记录、保存或写入。",
-    ].join("\n");
+      "约束：除 skill 名称、简述和索引路径外，其它信息必须通过 MCP 获取或写入。你必须先理解用户真实意图；目标不清楚时先追问；执行 skill 前必须用 MCP 读取 skill 索引路径对应的完整文档；需要读取工作区内容或写入任何内容时，必须调用可用 MCP 工具完成，不要假设插件已经读取过这些内容。只有观察到成功的 MCP 写入类调用后，才可以说已经记录、保存或写入。",
+      autoIngestInstruction,
+    ].filter(Boolean).join("\n");
   }
 
   private maxMemoryTurns(): number {

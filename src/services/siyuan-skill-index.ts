@@ -21,6 +21,8 @@ interface SiyuanBlockRow {
 const NOTEBOOK_NAME = "LLM-Wiki";
 const SKILLS_HPATH_PREFIX = "/skills/";
 const MAX_SKILLS = 100;
+const MAX_SKILL_DOCS = 500;
+const SKILL_ENTRY_TITLE = "SKILL";
 
 const escapeSql = (value: string): string => value.replace(/'/g, "''");
 
@@ -44,6 +46,20 @@ const summarizeDescription = (value: string): string => {
 const fullNotebookPath = (notebookName: string, hpath: string): string =>
   `/${notebookName}${hpath.startsWith("/") ? hpath : `/${hpath}`}`;
 
+const pathParts = (hpath: string): string[] =>
+  hpath
+    .split("/")
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+const isDirectSkillRoot = (hpath: string): boolean => {
+  const parts = pathParts(hpath);
+  return parts.length === 2 && parts[0] === "skills";
+};
+
+const skillEntryHpath = (skillRootHpath: string): string =>
+  `${skillRootHpath.replace(/\/+$/, "")}/${SKILL_ENTRY_TITLE}`;
+
 export class SiyuanSkillIndexReader {
   async listSkills(): Promise<SkillIndexItem[]> {
     const notebook = await this.findNotebook();
@@ -56,20 +72,29 @@ export class SiyuanSkillIndexReader {
         `AND hpath LIKE '${escapeSql(SKILLS_HPATH_PREFIX)}%'`,
         `AND hpath != '${SKILLS_HPATH_PREFIX.slice(0, -1)}'`,
         "ORDER BY hpath ASC",
-        `LIMIT ${MAX_SKILLS}`,
+        `LIMIT ${MAX_SKILL_DOCS}`,
       ].join(" "),
     );
 
-    const items = await Promise.all(
+    const docsByHpath = new Map(
       docs
-        .filter((doc) => doc.id && doc.hpath)
+        .filter((doc) => doc.hpath)
+        .map((doc) => [doc.hpath || "", doc]),
+    );
+    const skillRoots = docs.filter((doc) => doc.id && doc.hpath && isDirectSkillRoot(doc.hpath)).slice(0, MAX_SKILLS);
+
+    const items = await Promise.all(
+      skillRoots
         .map(async (doc) => {
-          const name = summarize(doc.content || this.nameFromPath(doc.hpath || ""));
-          const summary = await this.readSummary(doc.id || "");
+          const rootHpath = doc.hpath || "";
+          const entryDoc = docsByHpath.get(skillEntryHpath(rootHpath));
+          const sourceHpath = entryDoc?.hpath || rootHpath;
+          const name = this.nameFromPath(rootHpath);
+          const summary = await this.readSummary(entryDoc?.id || doc.id || "");
           return {
-            name: name || this.nameFromPath(doc.hpath || ""),
+            name: name || summarize(doc.content || rootHpath),
             summary: summary || "暂无简述",
-            sourcePath: fullNotebookPath(notebook.name, doc.hpath || ""),
+            sourcePath: fullNotebookPath(notebook.name, sourceHpath),
           };
         }),
     );

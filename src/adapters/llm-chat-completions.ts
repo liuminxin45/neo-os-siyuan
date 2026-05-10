@@ -86,7 +86,7 @@ const toWireMessages = (
     })
     .join("\n");
   const skillInstruction =
-    "当用户消息包含“已选 skill”时，插件只提供了 skill 名称、简述和索引路径。你必须先理解用户真实目标；目标不清楚时先追问。需要读取完整 skill、访问 LLM-Wiki/runs、读取或写入任何思源工作区内容时，必须通过 MCP 工具完成，不要假设插件已经读取过这些内容。只有 Observation 中出现成功的 MCP 写入类调用后，才可以说已经记录、保存或写入。";
+    "当用户消息包含“已选 skill”时，插件只提供了 skill 名称、简述和索引路径。你必须先理解用户真实目标；目标不清楚时先追问。执行 skill 前必须通过 MCP 读取索引路径对应的完整 skill 文档；读取或写入任何思源工作区内容时，必须通过 MCP 工具完成，不要假设插件已经读取过这些内容。auto-ingest 必须基于 SiYuan Sisyphus MCP 的 fs 工具执行：先写 /LLM-Wiki/raw/sources/auto-ingest/ 原始备份，再按 skill 规则写 /LLM-Wiki/wiki/ 下的结构化文档，并读回验证。只有 Observation 中出现成功的 MCP 写入类调用后，才可以说已经记录、保存或写入。";
   const mutationLedgerInstruction =
     "如果你执行过任何成功的写入、编辑、删除、移动、创建、重命名或属性更新类 MCP 调用，最终回答必须清楚说明实际发生的变更；插件运行时还会根据工具结果自动追加固定格式的“实际变更清单”，你不得编造未发生的变更。";
   const documentLinkInstruction =
