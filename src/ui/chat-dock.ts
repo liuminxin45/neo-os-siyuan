@@ -70,24 +70,18 @@ export class ChatDock {
     this.root.innerHTML = "";
     const shell = createElement("div", "siyuan-addon-chat");
     const header = createElement("header", "siyuan-addon-chat__header");
-    const title = createElement("div", "siyuan-addon-chat__title", "AI Chat");
     const headerActions = createElement("div", "siyuan-addon-chat__header-actions");
     headerActions.append(this.renderSessionPicker(session));
     const settings = createElement("button", "siyuan-addon-icon-button", "设置");
+    settings.type = "button";
+    settings.title = "打开 AI 设置";
     settings.addEventListener("click", () => this.settingsModal.open());
     headerActions.append(settings);
-    header.append(title, headerActions);
+    header.append(this.renderHeaderIdentity(session), headerActions);
 
     const messages = createElement("div", "siyuan-addon-chat__messages");
     if (session.messages.length === 0) {
-      const empty = createElement("div", "siyuan-addon-empty");
-      const active = this.options.settingsStore.get().activeProfileId;
-      empty.textContent = session.archiveStatus === "loading"
-        ? "正在加载聊天存档..."
-        : active
-          ? "输入问题开始聊天。"
-          : "请先在设置中添加 LLM 配置。";
-      messages.append(empty);
+      messages.append(this.renderEmptyState(session));
     }
     if (session.archiveStatus === "error" && session.archiveError) {
       messages.append(createElement("div", "siyuan-addon-archive-error", session.archiveError));
@@ -95,10 +89,11 @@ export class ChatDock {
     session.messages.forEach((message) => {
       const item = createElement("article", `siyuan-addon-message siyuan-addon-message--${message.role}`);
       const meta = createElement("div", "siyuan-addon-message__meta");
-      meta.append(createElement("span", "", this.metaText(message.role, message.status)));
+      meta.append(this.renderMessageRole(message.role, message.status));
       const messageActions = createElement("div", "siyuan-addon-message__actions");
       const copy = createElement("button", "siyuan-addon-message__button", "复制");
       copy.type = "button";
+      copy.title = "复制此条消息";
       copy.addEventListener("click", (event) => {
         event.preventDefault();
         event.stopPropagation();
@@ -126,7 +121,7 @@ export class ChatDock {
     textarea.className = "b3-text-field siyuan-addon-composer__input";
     textarea.placeholder = this.selectedSkill
       ? `描述你想用 ${this.selectedSkill.name} 完成的目标`
-      : "输入消息，/ 选择 skill，Enter 发送，Shift+Enter 换行";
+      : "询问、整理或维护你的知识库";
     textarea.value = this.draft;
     textarea.disabled = session.isGenerating;
     textarea.addEventListener("input", () => {
@@ -158,6 +153,8 @@ export class ChatDock {
     });
     const actions = createElement("div", "siyuan-addon-composer__actions");
     const clear = createElement("button", "b3-button b3-button--outline", "清空");
+    clear.type = "button";
+    clear.title = "清空当前会话";
     clear.addEventListener("click", () => {
       this.draft = "";
       this.selectedSkill = undefined;
@@ -166,6 +163,8 @@ export class ChatDock {
     const primaryClass = session.isGenerating || canContinue ? "b3-button b3-button--cancel" : "b3-button";
     const primaryLabel = session.isGenerating ? "停止" : canContinue ? "继续" : "发送";
     const primary = createElement("button", primaryClass, primaryLabel);
+    primary.type = "button";
+    primary.title = session.isGenerating ? "停止生成" : canContinue ? "继续当前推理" : "发送消息";
     primary.dataset.siyuanAddonAction = session.isGenerating ? "stop" : canContinue ? "continue" : "send";
     primary.addEventListener("click", () => {
       if (session.isGenerating) {
@@ -199,6 +198,39 @@ export class ChatDock {
     this.draft = "";
     this.selectedSkill = undefined;
     void this.options.chatService.send(value, { skill });
+  }
+
+  private renderHeaderIdentity(session: ChatSession): HTMLElement {
+    const wrapper = createElement("div", "siyuan-addon-chat__identity");
+    wrapper.append(createElement("div", "siyuan-addon-chat__title", "LLM-Wiki"));
+    const settings = this.options.settingsStore.get();
+    const profile = settings.llmProfiles.find((item) => item.id === settings.activeProfileId);
+    const status = session.isGenerating ? "生成中" : profile ? profile.name : "未配置模型";
+    wrapper.append(createElement("div", "siyuan-addon-chat__subtitle", status));
+    return wrapper;
+  }
+
+  private renderEmptyState(session: ChatSession): HTMLElement {
+    const empty = createElement("div", "siyuan-addon-empty");
+    const active = this.options.settingsStore.get().activeProfileId;
+    const title = session.archiveStatus === "loading" ? "正在加载会话" : active ? "知识库工作台就绪" : "需要 LLM 配置";
+    const body = session.archiveStatus === "loading"
+      ? "稍等片刻，历史会话会自动恢复。"
+      : active
+        ? "可以开始提问、整理文档或调用 skill。"
+        : "打开设置添加 API Key 和模型后即可使用。";
+    empty.append(createElement("div", "siyuan-addon-empty__title", title), createElement("div", "", body));
+    return empty;
+  }
+
+  private renderMessageRole(role: string, status: string): HTMLElement {
+    const wrapper = createElement("div", "siyuan-addon-message__role");
+    wrapper.append(createElement("span", "siyuan-addon-message__role-name", this.roleText(role)));
+    const statusText = this.statusText(status);
+    if (statusText) {
+      wrapper.append(createElement("span", `siyuan-addon-status siyuan-addon-status--${status}`, statusText));
+    }
+    return wrapper;
   }
 
   private renderSessionPicker(session: ChatSession): HTMLElement {
@@ -359,19 +391,18 @@ export class ChatDock {
     return this.skillLoadPromise;
   }
 
-  private metaText(role: string, status: string): string {
-    const roleText = role === "user" ? "你" : role === "tool-status" ? "工具" : "AI";
-    const statusText =
-      status === "streaming"
-        ? "生成中"
-        : status === "error"
-          ? "失败"
-          : status === "stopped"
-            ? "已停止"
-            : status === "waiting-continue"
-              ? "等待继续"
-              : "";
-    return [roleText, statusText].filter(Boolean).join(" · ");
+  private roleText(role: string): string {
+    if (role === "user") return "你";
+    if (role === "tool-status") return "工具";
+    return "AI";
+  }
+
+  private statusText(status: string): string {
+    if (status === "streaming") return "生成中";
+    if (status === "error") return "失败";
+    if (status === "stopped") return "已停止";
+    if (status === "waiting-continue") return "等待继续";
+    return "";
   }
 
   private renderReActTrace(message: ChatMessage): HTMLElement | undefined {
@@ -405,7 +436,7 @@ export class ChatDock {
   private renderReferences(message: ChatMessage): HTMLElement | undefined {
     if (!message.references?.length) return undefined;
     const wrapper = createElement("div", "siyuan-addon-references");
-    wrapper.append(createElement("div", "siyuan-addon-references__title", "References"));
+    wrapper.append(createElement("div", "siyuan-addon-references__title", "引用来源"));
     const list = createElement("ol", "siyuan-addon-references__list");
     for (const reference of message.references) {
       const item = createElement("li", "siyuan-addon-references__item");
@@ -414,7 +445,7 @@ export class ChatDock {
       title.addEventListener("click", () => {
         void this.options.documentOpener.open({ title: reference.title, path: reference.path });
       });
-      const source = createElement("span", "siyuan-addon-references__source", reference.sourceLabel || "Reference");
+      const source = createElement("span", "siyuan-addon-references__source", reference.sourceLabel || "引用");
       const path = createElement("button", "siyuan-addon-references__path", reference.path) as HTMLButtonElement;
       path.type = "button";
       path.addEventListener("click", () => {

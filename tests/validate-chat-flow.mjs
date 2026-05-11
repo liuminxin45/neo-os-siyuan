@@ -12,6 +12,8 @@ const checks = [
   ["continuation restores runtime message", "src/services/chat-service.ts", "toRuntimeMessage(userMessage), assistantMessage"],
   ["archive stores visible content only", "src/services/siyuan-chat-archive.ts", "content: message.content"],
   ["archive does not persist runtime content", "src/services/siyuan-chat-archive.ts", "interface ArchivedChatMessage"],
+  ["archive sql fallback", "src/services/siyuan-chat-archive.ts", "findArchiveDocId"],
+  ["archive startup skip stale entry", "src/services/chat-service.ts", "loadFirstAvailableArchive"],
   ["ui renders visible content", "src/ui/chat-dock.ts", "message.content"],
   ["tool filtering before runtime", "src/services/chat-service.ts", "const tools = this.toolsForPrompt(runtimePrompt)"],
   ["continuation uses matching tool filter", "src/services/chat-service.ts", "toolsForRuntimeMessages(runtimeMessages)"],

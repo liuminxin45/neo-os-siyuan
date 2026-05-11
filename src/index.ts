@@ -73,7 +73,7 @@ export default class SiyuanAddonPlugin extends Plugin {
         position: "RightBottom",
         size: { width: 360, height: 0 },
         icon: "iconSiyuanAddonAI",
-        title: "AI Chat",
+        title: "LLM-Wiki",
       },
       data: {},
       type: DOCK_TYPE,
