@@ -6,6 +6,9 @@
     "dev": "vite build --watch",
     "build": "vite build",
     "contract:check": "node tests/validate-contracts.mjs",
+    "mcp:lifecycle:check": "node tests/validate-mcp-lifecycle.mjs",
+    "llm-wiki:check": "node tests/validate-llm-wiki-kernel.mjs",
+    "chat:flow:check": "node tests/validate-chat-flow.mjs",
     "agent:check": "node tests/validate-agent-runtime.mjs",
     "typecheck": "tsc --noEmit"
   },

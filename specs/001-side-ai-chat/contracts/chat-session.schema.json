@@ -18,6 +18,7 @@
           "id": { "type": "string", "minLength": 1 },
           "role": { "enum": ["user", "assistant", "tool-status"] },
           "content": { "type": "string" },
+          "runtimeContent": { "type": "string" },
           "createdAt": { "type": "string" },
           "status": { "enum": ["pending", "streaming", "complete", "error", "stopped", "waiting-continue"] },
           "toolCallId": { "type": "string" },

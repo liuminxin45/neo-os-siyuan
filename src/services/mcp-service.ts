@@ -82,7 +82,9 @@ const summarizeToolResult = (tool: McpTool, args: Record<string, unknown>, resul
 };
 
 export class McpService {
-  private connections = new Map<string, ConnectedMcpServer>();
+  private connections = new Map<string, { connection: ConnectedMcpServer; fingerprint: string }>();
+  private pendingDiscoveries = new Map<string, Promise<{ server: McpServerConfig; tools: McpTool[] }>>();
+  private generations = new Map<string, number>();
   private tools = new Map<string, McpTool[]>();
 
   getTools(): McpTool[] {
@@ -90,10 +92,39 @@ export class McpService {
   }
 
   async discover(server: McpServerConfig): Promise<{ server: McpServerConfig; tools: McpTool[] }> {
+    const fingerprint = this.connectionFingerprint(server);
+    const pendingKey = `${server.id}:${fingerprint}`;
+    const pending = this.pendingDiscoveries.get(pendingKey);
+    if (pending) return pending;
+    const discovery = this.discoverOnce(server, fingerprint).finally(() => {
+      if (this.pendingDiscoveries.get(pendingKey) === discovery) {
+        this.pendingDiscoveries.delete(pendingKey);
+      }
+    });
+    this.pendingDiscoveries.set(pendingKey, discovery);
+    return discovery;
+  }
+
+  private async discoverOnce(server: McpServerConfig, fingerprint: string): Promise<{ server: McpServerConfig; tools: McpTool[] }> {
     const nextServer: McpServerConfig = { ...server, status: "validating", lastError: undefined };
+    const existing = this.connections.get(server.id);
+    if (existing && existing.fingerprint !== fingerprint) {
+      await this.closeServer(server.id);
+    }
+
+    const generation = this.generations.get(server.id) || 0;
+    let connection = this.connections.get(server.id)?.connection;
+    let ownsNewConnection = false;
     try {
-      const connection = await connectMcpServer(server);
+      if (!connection) {
+        connection = await connectMcpServer(server);
+        ownsNewConnection = true;
+      }
       const rawTools = await connection.listTools();
+      if ((this.generations.get(server.id) || 0) !== generation) {
+        if (ownsNewConnection) await connection.close().catch(() => undefined);
+        return { server: { ...nextServer, status: "idle", updatedAt: nowIso() }, tools: [] };
+      }
       const tools = rawTools.map((tool) => ({
         serverId: server.id,
         name: tool.name,
@@ -101,10 +132,11 @@ export class McpService {
         inputSchema: tool.inputSchema,
         llmName: createLlmToolName(server, tool.name),
       }));
-      this.connections.set(server.id, connection);
+      this.connections.set(server.id, { connection, fingerprint });
       this.tools.set(server.id, tools);
       return { server: { ...nextServer, status: "ready", updatedAt: nowIso() }, tools };
     } catch (error) {
+      if (ownsNewConnection && connection) await connection.close().catch(() => undefined);
       return {
         server: { ...nextServer, status: "error", lastError: safeErrorText(error), updatedAt: nowIso() },
         tools: [],
@@ -123,9 +155,9 @@ export class McpService {
       argumentsSummary: summarizeJson(args, 240),
     };
     try {
-      const connection = this.connections.get(tool.serverId);
-      if (!connection) throw new Error("MCP 未连接");
-      const result = await connection.callTool(tool.name, args);
+      const managed = this.connections.get(tool.serverId);
+      if (!managed) throw new Error("MCP 未连接");
+      const result = await managed.connection.callTool(tool.name, args);
       if (generationId.endsWith(":stopped")) {
         return { ...call, status: "stopped", finishedAt: nowIso() };
       }
@@ -138,8 +170,34 @@ export class McpService {
     }
   }
 
+  async closeServer(serverId: string): Promise<void> {
+    this.bumpGeneration(serverId);
+    const managed = this.connections.get(serverId);
+    this.connections.delete(serverId);
+    this.tools.delete(serverId);
+    if (managed) await managed.connection.close().catch(() => undefined);
+  }
+
   async closeAll(): Promise<void> {
-    await Promise.all([...this.connections.values()].map((connection) => connection.close().catch(() => undefined)));
+    for (const serverId of this.connections.keys()) this.bumpGeneration(serverId);
+    const connections = [...this.connections.values()].map(({ connection }) => connection);
     this.connections.clear();
+    this.tools.clear();
+    this.pendingDiscoveries.clear();
+    await Promise.all(connections.map((connection) => connection.close().catch(() => undefined)));
+  }
+
+  private bumpGeneration(serverId: string): void {
+    this.generations.set(serverId, (this.generations.get(serverId) || 0) + 1);
+  }
+
+  private connectionFingerprint(server: McpServerConfig): string {
+    return JSON.stringify({
+      transport: server.transport,
+      command: server.command || "",
+      args: server.args || [],
+      env: Object.fromEntries(Object.entries(server.env || {}).sort(([left], [right]) => left.localeCompare(right))),
+      url: server.url || "",
+    });
   }
 }

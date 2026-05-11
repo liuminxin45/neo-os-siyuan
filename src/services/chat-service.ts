@@ -9,6 +9,7 @@ import type { McpService } from "./mcp-service";
 import { AgentRuntime } from "./agent-runtime";
 import { DEFAULT_AGENT_MODE, REACT_PAUSE_MESSAGE, type AgentMode, type ReActStep } from "../models/agent";
 import { compareChatArchives, type SiyuanChatArchiveStore } from "./siyuan-chat-archive";
+import { LlmWikiKernel, shouldUseLlmWikiKernel } from "./llm-wiki-kernel";
 
 export interface ChatServiceOptions {
   getActiveProfile: () => LlmProfile | undefined;
@@ -16,6 +17,7 @@ export interface ChatServiceOptions {
   getMaxMemoryTurns?: () => number | undefined;
   mcpService: McpService;
   archiveStore?: SiyuanChatArchiveStore;
+  llmWikiKernel?: LlmWikiKernel;
 }
 
 export interface ChatSendOptions {
@@ -49,7 +51,8 @@ const mergeArchiveSummary = (
 };
 
 const looksLikeMcpRequest = (prompt: string): boolean =>
-  /\bmcp\b/i.test(prompt) || /工具|思源|笔记本|笔记|文档|数据库|块|标签|文件|搜索|遍历|读取|查询|当前工作区/.test(prompt);
+  /\bmcp\b/i.test(prompt) ||
+  /工具|思源|笔记本|笔记|文档|数据库|块|标签|文件|搜索|遍历|读取|查询|当前工作区|保存|记录|写入|创建|新增|更新|归档|导入|整理|蒸馏/.test(prompt);
 
 const isMemoryUser = (message: ChatMessage | undefined): message is ChatMessage =>
   message?.role === "user" && message.status === "complete" && message.content.trim().length > 0;
@@ -63,6 +66,16 @@ const toMemoryMessage = (message: ChatMessage): ChatMessage => ({
   content: message.content,
   createdAt: message.createdAt,
   status: "complete",
+});
+
+const toRuntimeMessage = (message: ChatMessage): ChatMessage => ({
+  id: message.id,
+  role: message.role,
+  content: message.runtimeContent || message.content,
+  createdAt: message.createdAt,
+  status: message.status === "waiting-continue" ? "complete" : message.status,
+  references: message.references,
+  reactTrace: message.reactTrace,
 });
 
 export class ChatService {
@@ -118,8 +131,7 @@ export class ChatService {
   }
 
   async send(content: string, options: ChatSendOptions = {}): Promise<void> {
-    const prompt = this.formatPrompt(content, options.skill);
-    if (!prompt || this.session.isGenerating) return;
+    if (!content.trim() || this.session.isGenerating) return;
     if (this.session.continuation) {
       this.abandonContinuation();
     }
@@ -128,12 +140,16 @@ export class ChatService {
       this.appendAssistantError("请先在设置中添加并选择 LLM 配置");
       return;
     }
+    const runtimePrompt = await this.formatPrompt(content, options.skill);
+    if (!runtimePrompt) return;
+    const visiblePrompt = this.visibleUserPrompt(content, options.skill);
 
     const generationId = createId("gen");
     const userMessage: ChatMessage = {
       id: createId("msg"),
       role: "user",
-      content: prompt,
+      content: visiblePrompt,
+      runtimeContent: runtimePrompt === visiblePrompt ? undefined : runtimePrompt,
       createdAt: nowIso(),
       status: "complete",
     };
@@ -158,8 +174,8 @@ export class ChatService {
     this.emit();
 
     try {
-      const tools = this.options.mcpService.getTools();
-      if (tools.length === 0 && looksLikeMcpRequest(prompt)) {
+      const tools = this.toolsForPrompt(runtimePrompt);
+      if (tools.length === 0 && looksLikeMcpRequest(content)) {
         this.appendAssistantChunk(assistantMessage.id, "当前没有可用的 MCP 工具，请先在设置中连接并发现 MCP 工具。", generationId);
         this.finishAssistant(assistantMessage.id, generationId);
         await this.saveCurrentSession();
@@ -168,7 +184,7 @@ export class ChatService {
       const result = await this.agentRuntime.run({
         mode: this.session.agentMode,
         profile,
-        messages: [...memoryMessages, userMessage, assistantMessage],
+        messages: [...memoryMessages, toRuntimeMessage(userMessage), assistantMessage],
         tools,
         signal: this.abortController.signal,
       }, this.agentHandlers(assistantMessage.id, generationId));
@@ -228,7 +244,7 @@ export class ChatService {
         mode: this.session.agentMode,
         profile,
         messages: runtimeMessages,
-        tools: this.options.mcpService.getTools(),
+        tools: this.toolsForRuntimeMessages(runtimeMessages),
         signal: this.abortController.signal,
         continuation,
       }, this.agentHandlers(continuation.assistantMessageId, generationId));
@@ -263,9 +279,13 @@ export class ChatService {
       onStep: (step: ReActStep) => this.appendReActStep(messageId, step, generationId),
       onToolStart: (tool: McpTool, args: Record<string, unknown>, requestId?: string) =>
         this.startToolCall(tool, args, requestId, generationId),
-      onToolFinish: (call: McpToolCall) => this.updateToolCall(call),
+      onToolFinish: (call: McpToolCall) => {
+        if (this.session.generationId !== generationId) return;
+        this.updateToolCall(call);
+        void this.options.llmWikiKernel?.recordToolOperation(call).catch(() => undefined);
+      },
       callTool: (tool: McpTool, args: Record<string, unknown>) =>
-        this.options.mcpService.callTool(tool, args, this.session.generationId || ""),
+        this.callToolWithPolicy(tool, args, generationId),
     };
   }
 
@@ -362,9 +382,19 @@ export class ChatService {
     return this.archiveSavePromise;
   }
 
-  private formatPrompt(content: string, skill?: SkillIndexItem): string {
+  private async formatPrompt(content: string, skill?: SkillIndexItem): Promise<string> {
     const userGoal = content.trim();
-    if (!skill) return userGoal;
+    const basePrompt = !skill ? userGoal : this.formatSkillPrompt(userGoal, skill);
+    if (!this.options.llmWikiKernel || !shouldUseLlmWikiKernel(basePrompt, skill)) return basePrompt;
+    return this.options.llmWikiKernel.assemblePrompt(basePrompt, { userGoal, selectedSkill: skill });
+  }
+
+  private visibleUserPrompt(content: string, skill?: SkillIndexItem): string {
+    const userGoal = content.trim();
+    return skill ? `/${skill.name} ${userGoal || "执行该 skill"}` : userGoal;
+  }
+
+  private formatSkillPrompt(userGoal: string, skill: SkillIndexItem): string {
     const normalizedSkillName = skill.name.trim().toLowerCase();
     const normalizedSourcePath = skill.sourcePath.replace(/\\/g, "/").toLowerCase();
     const autoIngestInstruction =
@@ -379,6 +409,34 @@ export class ChatService {
       "约束：除 skill 名称、简述和索引路径外，其它信息必须通过 MCP 获取或写入。你必须先理解用户真实意图；目标不清楚时先追问；执行 skill 前必须用 MCP 读取 skill 索引路径对应的完整文档；需要读取工作区内容或写入任何内容时，必须调用可用 MCP 工具完成，不要假设插件已经读取过这些内容。只有观察到成功的 MCP 写入类调用后，才可以说已经记录、保存或写入。",
       autoIngestInstruction,
     ].filter(Boolean).join("\n");
+  }
+
+  private toolsForPrompt(prompt: string): McpTool[] {
+    const tools = this.options.mcpService.getTools();
+    return shouldUseLlmWikiKernel(prompt) && this.options.llmWikiKernel ? this.options.llmWikiKernel.filterTools(tools) : tools;
+  }
+
+  private toolsForRuntimeMessages(messages: ChatMessage[]): McpTool[] {
+    const latestUser = [...messages].reverse().find((message) => message.role === "user");
+    return this.toolsForPrompt(latestUser?.content || "");
+  }
+
+  private async callToolWithPolicy(tool: McpTool, args: Record<string, unknown>, generationId: string): Promise<McpToolCall> {
+    const decision = this.options.llmWikiKernel?.authorizeToolCall(tool, args);
+    if (decision && !decision.allowed) {
+      return {
+        id: createId("tool"),
+        serverId: tool.serverId,
+        toolName: tool.name,
+        llmName: tool.llmName,
+        status: "error",
+        startedAt: nowIso(),
+        finishedAt: nowIso(),
+        argumentsSummary: JSON.stringify(args),
+        error: decision.reason || "LLM-Wiki 工具策略阻止了该调用。",
+      };
+    }
+    return this.options.mcpService.callTool(tool, args, generationId);
   }
 
   private maxMemoryTurns(): number {
@@ -406,7 +464,7 @@ export class ChatService {
     const userMessage = this.session.messages[assistantIndex - 1];
     const assistantMessage = this.session.messages[assistantIndex];
     const priorMemory = this.memoryMessages(this.session.messages.slice(0, assistantIndex - 1));
-    return isMemoryUser(userMessage) ? [...priorMemory, toMemoryMessage(userMessage), assistantMessage] : [...priorMemory, assistantMessage];
+    return isMemoryUser(userMessage) ? [...priorMemory, toRuntimeMessage(userMessage), assistantMessage] : [...priorMemory, assistantMessage];
   }
 
   private abandonContinuation(): void {
@@ -485,7 +543,6 @@ export class ChatService {
     if (this.session.generationId !== generationId) return;
     this.session = {
       ...this.session,
-      isGenerating: false,
       messages: this.session.messages.map((message) =>
         message.id === messageId
           ? {

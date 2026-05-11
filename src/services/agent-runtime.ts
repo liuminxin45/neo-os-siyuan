@@ -11,6 +11,7 @@ import {
   type ReActContinuationState,
   type ReActStep,
 } from "../models/agent";
+import { LLM_WIKI_CONTEXT_HEADER } from "../models/llm-wiki";
 import { createId, nowIso } from "../utils/ids";
 import { summarizeJson } from "../utils/masks";
 
@@ -401,11 +402,24 @@ const writeBodyFromArgs = (args: Record<string, unknown>): string =>
 
 const isSelectedSkillGoal = (goal: string): boolean => /已选 skill：/.test(goal);
 
+const isLlmWikiRuntimeGoal = (goal: string): boolean => goal.includes(LLM_WIKI_CONTEXT_HEADER);
+
+const runtimeUserIntent = (goal: string): string => {
+  const skillGoal = goal.match(/(?:^|\n)用户目标：([^\n]+)/);
+  if (skillGoal?.[1]?.trim()) return skillGoal[1].trim();
+  if (!isLlmWikiRuntimeGoal(goal)) return goal;
+  const blocks = goal
+    .split(/\n{2,}/)
+    .map((block) => block.trim())
+    .filter(Boolean);
+  return blocks[blocks.length - 1] || goal;
+};
+
 const hasWorkspaceMutationIntent = (goal: string): boolean =>
-  /记下|记录|保存|写入|创建|新增|更新|归档|摄入|导入|蒸馏|提炼|distill|ingest|write|save|record|create|update/i.test(goal);
+  /记下|记录|保存|写入|创建|新增|更新|归档|摄入|导入|蒸馏|提炼|distill|ingest|write|save|record|create|update/i.test(runtimeUserIntent(goal));
 
 const requiresSuccessfulMutation = (goal: string): boolean =>
-  isSelectedSkillGoal(goal) && hasWorkspaceMutationIntent(goal);
+  (isSelectedSkillGoal(goal) || isLlmWikiRuntimeGoal(goal)) && hasWorkspaceMutationIntent(goal);
 
 const hasSuccessfulMutation = (toolResults: McpToolCall[]): boolean =>
   toolResults.some((result) =>
@@ -420,9 +434,10 @@ const stepHasSuccessfulMutation = (step: ReActStep): boolean =>
 
 const requiredGoalMarkers = (goal: string): string[] => {
   const markers = new Set<string>();
-  const date = goal.match(/\d{4}年\d{1,2}月\d{1,2}/)?.[0] || goal.match(/\d{4}-\d{1,2}-\d{1,2}/)?.[0];
+  const intent = runtimeUserIntent(goal);
+  const date = intent.match(/\d{4}年\d{1,2}月\d{1,2}/)?.[0] || intent.match(/\d{4}-\d{1,2}-\d{1,2}/)?.[0];
   if (date) markers.add(date);
-  for (const match of goal.matchAll(/[A-Za-z][A-Za-z0-9_-]{2,}(?:\s+[A-Za-z][A-Za-z0-9_-]{2,})*/g)) {
+  for (const match of intent.matchAll(/[A-Za-z][A-Za-z0-9_-]{2,}(?:\s+[A-Za-z][A-Za-z0-9_-]{2,})*/g)) {
     const value = match[0].trim();
     if (!/skill|write|save|record|mcp/i.test(value)) markers.add(value);
   }

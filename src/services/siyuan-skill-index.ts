@@ -60,6 +60,9 @@ const isDirectSkillRoot = (hpath: string): boolean => {
 const skillEntryHpath = (skillRootHpath: string): string =>
   `${skillRootHpath.replace(/\/+$/, "")}/${SKILL_ENTRY_TITLE}`;
 
+const hasSkillEntry = (docsByHpath: Map<string, SiyuanBlockRow>, skillRootHpath: string): boolean =>
+  Boolean(docsByHpath.get(skillEntryHpath(skillRootHpath)));
+
 export class SiyuanSkillIndexReader {
   async listSkills(): Promise<SkillIndexItem[]> {
     const notebook = await this.findNotebook();
@@ -81,16 +84,18 @@ export class SiyuanSkillIndexReader {
         .filter((doc) => doc.hpath)
         .map((doc) => [doc.hpath || "", doc]),
     );
-    const skillRoots = docs.filter((doc) => doc.id && doc.hpath && isDirectSkillRoot(doc.hpath)).slice(0, MAX_SKILLS);
+    const skillRoots = docs
+      .filter((doc) => doc.id && doc.hpath && isDirectSkillRoot(doc.hpath) && hasSkillEntry(docsByHpath, doc.hpath))
+      .slice(0, MAX_SKILLS);
 
     const items = await Promise.all(
       skillRoots
         .map(async (doc) => {
           const rootHpath = doc.hpath || "";
           const entryDoc = docsByHpath.get(skillEntryHpath(rootHpath));
-          const sourceHpath = entryDoc?.hpath || rootHpath;
+          const sourceHpath = entryDoc?.hpath || "";
           const name = this.nameFromPath(rootHpath);
-          const summary = await this.readSummary(entryDoc?.id || doc.id || "");
+          const summary = await this.readSummary(entryDoc?.id || "");
           return {
             name: name || summarize(doc.content || rootHpath),
             summary: summary || "暂无简述",
