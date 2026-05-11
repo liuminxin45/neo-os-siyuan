@@ -28,7 +28,7 @@ export class SettingsModal {
 
   open(): void {
     this.dialog = new Dialog({
-      title: "AI 设置",
+      title: "LLM-Wiki 设置",
       content: '<div class="siyuan-addon-settings"></div>',
       width: "760px",
       height: "680px",
@@ -46,7 +46,7 @@ export class SettingsModal {
   private renderLlmSection(): HTMLElement {
     const settings = this.options.store.get();
     const section = createElement("section", "siyuan-addon-settings__section");
-    section.append(createElement("h2", "siyuan-addon-settings__title", "LLM 配置"));
+    section.append(this.sectionHeader("LLM 配置", "只保留模型、端点和密钥这些高频必要项。"));
 
     const list = createElement("div", "siyuan-addon-list");
     if (settings.llmProfiles.length === 0) {
@@ -54,33 +54,39 @@ export class SettingsModal {
     }
     settings.llmProfiles.forEach((profile) => {
       const row = createElement("div", "siyuan-addon-list__row");
-      const info = createElement(
-        "div",
-        "siyuan-addon-list__info",
-        `${profile.name} · ${this.providerLabel(profile.provider)} · ${profile.model}`,
+      const info = createElement("div", "siyuan-addon-list__info");
+      const title = createElement("div", "siyuan-addon-list__title");
+      title.append(
+        createElement("span", "", profile.name),
+        createElement("span", "siyuan-addon-status", this.providerLabel(profile.provider)),
       );
-      const masked = createElement(
-        "div",
-        "siyuan-addon-list__meta",
-        `API Key: ${maskSecret(profile.apiKey)}`,
-      );
-      info.append(masked);
+      if (profile.id === settings.activeProfileId) {
+        title.append(createElement("span", "siyuan-addon-status siyuan-addon-status--active", "当前"));
+      }
+      const masked = createElement("div", "siyuan-addon-list__meta", `${profile.model} · API Key ${maskSecret(profile.apiKey)}`);
+      info.append(title, masked);
+      const rowActions = createElement("div", "siyuan-addon-list__row-actions");
       const active = createElement("button", profile.id === settings.activeProfileId ? "b3-button b3-button--outline" : "b3-button", profile.id === settings.activeProfileId ? "当前" : "设为当前");
+      active.type = "button";
+      active.disabled = profile.id === settings.activeProfileId;
       active.addEventListener("click", async () => {
         await this.options.store.setLlmProfiles(settings.llmProfiles, profile.id);
         this.options.onSettingsChanged();
         this.render();
       });
       const edit = createElement("button", "b3-button b3-button--outline", "编辑");
+      edit.type = "button";
       edit.addEventListener("click", () => this.renderLlmForm(cloneProfileToDraft(profile), profile));
       const remove = createElement("button", "b3-button b3-button--cancel", "删除");
+      remove.type = "button";
       remove.addEventListener("click", async () => {
         const next = settings.llmProfiles.filter((item) => item.id !== profile.id);
         await this.options.store.setLlmProfiles(next, settings.activeProfileId === profile.id ? next[0]?.id : settings.activeProfileId);
         this.options.onSettingsChanged();
         this.render();
       });
-      row.append(info, active, edit, remove);
+      rowActions.append(active, edit, remove);
+      row.append(info, rowActions);
       list.append(row);
     });
 
@@ -88,16 +94,19 @@ export class SettingsModal {
     const hasProvider = (provider: LlmProfile["provider"]): boolean => settings.llmProfiles.some((profile) => profile.provider === provider);
     if (!hasProvider("deepseek")) {
       const addDeepSeek = createElement("button", "b3-button b3-button--outline", "新增 DeepSeek");
+      addDeepSeek.type = "button";
       addDeepSeek.addEventListener("click", () => this.renderLlmForm(createEmptyLlmDraft("deepseek")));
       actions.append(addDeepSeek);
     }
     if (!hasProvider("openai-compatible")) {
       const addOpenAi = createElement("button", "b3-button b3-button--outline", "新增 OpenAI Compatible");
+      addOpenAi.type = "button";
       addOpenAi.addEventListener("click", () => this.renderLlmForm(createEmptyLlmDraft("openai-compatible")));
       actions.append(addOpenAi);
     }
     if (!hasProvider("kimi-coding-plan")) {
       const addKimi = createElement("button", "b3-button b3-button--outline", "新增 Kimi CodingPlan");
+      addKimi.type = "button";
       addKimi.addEventListener("click", () => this.renderLlmForm(createEmptyLlmDraft("kimi-coding-plan")));
       actions.append(addKimi);
     }
@@ -108,7 +117,7 @@ export class SettingsModal {
   private renderMemorySection(): HTMLElement {
     const settings = this.options.store.get();
     const section = createElement("section", "siyuan-addon-settings__section");
-    section.append(createElement("h2", "siyuan-addon-settings__title", "对话记忆"));
+    section.append(this.sectionHeader("对话记忆", "控制发送给模型的最近上下文长度。"));
     const select = this.select(
       "最大记忆对话轮次",
       MAX_MEMORY_TURN_OPTIONS.map((value) => ({ label: `${value} 轮`, value: String(value) })),
@@ -127,7 +136,7 @@ export class SettingsModal {
   private renderLlmWikiSection(): HTMLElement {
     const settings = this.options.store.get();
     const section = createElement("section", "siyuan-addon-settings__section");
-    section.append(createElement("h2", "siyuan-addon-settings__title", "LLM-Wiki 知识库"));
+    section.append(this.sectionHeader("LLM-Wiki 知识库", "保持 AGENTS、wiki、raw、skills、runs 五层核心可控。"));
 
     const enabled = document.createElement("label");
     enabled.className = "siyuan-addon-checkbox";
@@ -148,12 +157,8 @@ export class SettingsModal {
     );
     const allowedServers = this.textarea("允许的 MCP Server ID（每行一个；留空表示全部）", settings.llmWiki.allowedMcpServerIds.join("\n"));
     const allowedTools = this.textarea("允许的 MCP Tool 名称（每行一个；留空表示全部）", settings.llmWiki.toolAllowlist.join("\n"));
-    const hint = createElement(
-      "p",
-      "siyuan-addon-muted",
-      "默认使用 /LLM-Wiki/AGENTS、wiki、raw、skills、runs 五层核心结构；auto-safe 会允许创建/追加/更新，阻止删除、移动、重命名。",
-    );
     const save = createElement("button", "b3-button", "保存知识库设置");
+    save.type = "button";
     save.addEventListener("click", async () => {
       await this.options.store.setLlmWikiSettings({
         enabled: enabledInput.checked,
@@ -170,7 +175,6 @@ export class SettingsModal {
     const actions = createElement("div", "siyuan-addon-actions");
     actions.append(save);
     section.append(
-      hint,
       enabled,
       notebookName.parentElement!,
       writeMode.parentElement!,
@@ -186,7 +190,7 @@ export class SettingsModal {
     if (!root) return;
     root.innerHTML = "";
     const section = createElement("section", "siyuan-addon-settings__section");
-    section.append(createElement("h2", "siyuan-addon-settings__title", existing ? "编辑 LLM 配置" : "新增 LLM 配置"));
+    section.append(this.sectionHeader(existing ? "编辑 LLM 配置" : "新增 LLM 配置", "保存后会立即成为可选模型 Profile。"));
     const provider = this.input("Provider", draft.provider);
     provider.disabled = true;
     const name = this.input("名称", draft.name);
@@ -204,6 +208,7 @@ export class SettingsModal {
     section.append(model.parentElement!);
     const errors = createElement("div", "siyuan-addon-form-errors");
     const save = createElement("button", "b3-button", "保存");
+    save.type = "button";
     save.addEventListener("click", async () => {
       const nextDraft: LlmProfileDraft = {
         id: draft.id,
@@ -228,6 +233,7 @@ export class SettingsModal {
       this.render();
     });
     const cancel = createElement("button", "b3-button b3-button--outline", "取消");
+    cancel.type = "button";
     cancel.addEventListener("click", () => this.render());
     const actions = createElement("div", "siyuan-addon-actions");
     actions.append(save, cancel);
@@ -238,20 +244,31 @@ export class SettingsModal {
   private renderMcpSection(): HTMLElement {
     const settings = this.options.store.get();
     const section = createElement("section", "siyuan-addon-settings__section");
-    section.append(createElement("h2", "siyuan-addon-settings__title", "MCP 配置"));
+    section.append(this.sectionHeader("MCP 配置", "统一管理可被 AI 自动调用的工具服务。"));
     const list = createElement("div", "siyuan-addon-list");
     if (settings.mcpServers.length === 0) {
       list.append(createElement("p", "siyuan-addon-muted", "还没有 MCP Server。"));
     }
     settings.mcpServers.forEach((server) => {
       const row = createElement("div", "siyuan-addon-list__row");
-      const info = createElement("div", "siyuan-addon-list__info", `${server.name} · ${server.transport} · ${server.status}`);
+      const info = createElement("div", "siyuan-addon-list__info");
+      const title = createElement("div", "siyuan-addon-list__title");
+      title.append(
+        createElement("span", "", server.name),
+        createElement("span", "siyuan-addon-status", server.transport),
+        createElement("span", `siyuan-addon-status siyuan-addon-status--${server.status}`, server.status),
+      );
       if (server.lastError) info.append(createElement("div", "siyuan-addon-list__meta", server.lastError));
+      info.prepend(title);
+      const rowActions = createElement("div", "siyuan-addon-list__row-actions");
       const discover = createElement("button", "b3-button b3-button--outline", "发现工具");
+      discover.type = "button";
       discover.addEventListener("click", () => this.discoverServer(server));
       const edit = createElement("button", "b3-button b3-button--outline", "编辑");
+      edit.type = "button";
       edit.addEventListener("click", () => this.renderMcpForm(cloneServerToDraft(server), server));
       const remove = createElement("button", "b3-button b3-button--cancel", "删除");
+      remove.type = "button";
       remove.addEventListener("click", async () => {
         await this.options.mcpService.closeServer(server.id);
         await this.options.store.setMcpServers(settings.mcpServers.filter((item) => item.id !== server.id));
@@ -259,12 +276,14 @@ export class SettingsModal {
         this.options.onSettingsChanged();
         this.render();
       });
-      row.append(info, discover, edit, remove);
+      rowActions.append(discover, edit, remove);
+      row.append(info, rowActions);
       list.append(row);
     });
     const actions = createElement("div", "siyuan-addon-actions");
     (["stdio", "sse", "streamable-http"] as McpTransportType[]).forEach((transport) => {
       const button = createElement("button", "b3-button b3-button--outline", `新增 ${transport}`);
+      button.type = "button";
       button.addEventListener("click", () =>
         this.renderMcpForm({ name: transport, transport, enabled: true, command: "", argsText: "", envText: "", url: "" }),
       );
@@ -279,7 +298,7 @@ export class SettingsModal {
     if (!root) return;
     root.innerHTML = "";
     const section = createElement("section", "siyuan-addon-settings__section");
-    section.append(createElement("h2", "siyuan-addon-settings__title", existing ? "编辑 MCP Server" : "新增 MCP Server"));
+    section.append(this.sectionHeader(existing ? "编辑 MCP Server" : "新增 MCP Server", "保存后会刷新对应工具缓存。"));
     const name = this.input("名称", draft.name);
     const enabled = document.createElement("label");
     enabled.className = "siyuan-addon-checkbox";
@@ -303,6 +322,7 @@ export class SettingsModal {
     }
     const errors = createElement("div", "siyuan-addon-form-errors", validation ? Object.values(validation.errors).join("；") : "");
     const save = createElement("button", "b3-button", "保存");
+    save.type = "button";
     save.addEventListener("click", async () => {
       const nextDraft: McpServerDraft = {
         id: draft.id,
@@ -334,6 +354,7 @@ export class SettingsModal {
       this.render();
     });
     const cancel = createElement("button", "b3-button b3-button--outline", "取消");
+    cancel.type = "button";
     cancel.addEventListener("click", () => this.render());
     const actions = createElement("div", "siyuan-addon-actions");
     actions.append(save, cancel);
@@ -356,6 +377,13 @@ export class SettingsModal {
     if (provider === "deepseek") return "DeepSeek";
     if (provider === "kimi-coding-plan") return "Kimi CodingPlan";
     return "OpenAI Compatible";
+  }
+
+  private sectionHeader(title: string, description: string): HTMLElement {
+    const header = createElement("div", "siyuan-addon-settings__header");
+    header.append(createElement("h2", "siyuan-addon-settings__title", title));
+    header.append(createElement("div", "siyuan-addon-settings__desc", description));
+    return header;
   }
 
   private input(labelText: string, value: string, type = "text"): HTMLInputElement {

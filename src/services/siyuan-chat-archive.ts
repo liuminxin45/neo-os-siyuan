@@ -98,6 +98,9 @@ const updatedAtFromBlock = (updated?: string): number => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
+const isMissingArchiveError = (error: unknown): boolean =>
+  error instanceof Error && /file does not exist|not found|404|文件不存在|不存在/i.test(error.message);
+
 const isReference = (value: unknown): value is ChatReference => {
   if (!value || typeof value !== "object") return false;
   const item = value as Record<string, unknown>;
@@ -159,7 +162,7 @@ export class SiyuanChatArchiveStore {
     const notebook = await this.findNotebook();
     const fileName = safeFileName(conversationId);
     const hpath = archiveHPath(fileName);
-    const docId = (await this.getIdsByHPath(notebook.id, hpath))[0];
+    const docId = await this.findArchiveDocId(notebook.id, hpath);
     if (!docId) return this.loadFileArchive(conversationId);
     const raw = await this.exportMarkdown(docId);
     const messages = parseArchivedRows(raw)
@@ -267,7 +270,13 @@ export class SiyuanChatArchiveStore {
     const archiveDir = await this.resolveArchiveDir();
     const fileName = safeFileName(conversationId);
     const path = archivePath(archiveDir, fileName);
-    const raw = await this.getFile(path);
+    let raw = "";
+    try {
+      raw = await this.getFile(path);
+    } catch (error) {
+      if (isMissingArchiveError(error)) throw new Error(`聊天存档文件不存在：${fileName}`);
+      throw error;
+    }
     const messages = parseArchivedRows(raw)
       .map((item) => normalizeArchivedMessage(item, conversationId))
       .filter((message): message is ChatMessage => Boolean(message));
@@ -290,7 +299,8 @@ export class SiyuanChatArchiveStore {
         updatedAt: (file.updated || 0) * 1000,
         messageCount: messages.length,
       };
-    } catch {
+    } catch (error) {
+      if (isMissingArchiveError(error)) return undefined;
       return {
         conversationId,
         fileName: file.name,
@@ -346,6 +356,22 @@ export class SiyuanChatArchiveStore {
     } catch {
       return [];
     }
+  }
+
+  private async findArchiveDocId(notebookId: string, hpath: string): Promise<string | undefined> {
+    const byHpath = await this.getIdsByHPath(notebookId, hpath);
+    if (byHpath[0]) return byHpath[0];
+    const rows = await this.query<SiyuanBlockRow>(
+      [
+        "SELECT id, hpath",
+        "FROM blocks",
+        `WHERE box = '${escapeSql(notebookId)}'`,
+        "AND type = 'd'",
+        `AND hpath = '${escapeSql(hpath)}'`,
+        "LIMIT 1",
+      ].join(" "),
+    );
+    return rows.find((row) => row.id)?.id;
   }
 
   private async findNotebook(): Promise<SiyuanNotebook> {

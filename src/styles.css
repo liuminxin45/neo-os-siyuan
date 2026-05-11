@@ -1,123 +1,385 @@
-.siyuan-addon-chat {
+.siyuan-addon-chat,
+.siyuan-addon-settings {
+  --saa-accent: #5e6ad2;
+  --saa-accent-hover: #737ee8;
+  --saa-accent-soft: rgba(94, 106, 210, 0.14);
+  --saa-danger: var(--b3-theme-error);
+  --saa-danger-soft: var(--b3-theme-error-light);
+  --saa-success: #27a644;
+  --saa-success-soft: rgba(39, 166, 68, 0.12);
+  --saa-bg: color-mix(in srgb, var(--b3-theme-background) 96%, #010102);
+  --saa-surface: color-mix(in srgb, var(--b3-theme-surface) 88%, #0f1011);
+  --saa-surface-2: color-mix(in srgb, var(--b3-theme-surface) 78%, #141516);
+  --saa-surface-3: color-mix(in srgb, var(--b3-theme-background) 70%, #18191a);
+  --saa-border: color-mix(in srgb, var(--b3-theme-surface-lighter) 82%, #23252a);
+  --saa-border-strong: color-mix(in srgb, var(--b3-theme-surface-lighter) 62%, #34343a);
+  --saa-text: var(--b3-theme-on-background);
+  --saa-muted: var(--b3-theme-on-surface);
+  --saa-radius-xs: 4px;
+  --saa-radius-sm: 6px;
+  --saa-radius-md: 8px;
+  --saa-radius-lg: 12px;
+  --saa-shadow: 0 16px 40px rgba(0, 0, 0, 0.18);
   box-sizing: border-box;
+  color: var(--saa-text);
+  font-family: var(--b3-font-family);
+  letter-spacing: 0;
+}
+
+.siyuan-addon-chat *,
+.siyuan-addon-settings *,
+.siyuan-addon-chat *::before,
+.siyuan-addon-chat *::after,
+.siyuan-addon-settings *::before,
+.siyuan-addon-settings *::after {
+  box-sizing: border-box;
+}
+
+.siyuan-addon-chat {
+  background: var(--saa-bg);
   display: flex;
   flex-direction: column;
   height: 100%;
   min-width: 280px;
-  background: var(--b3-theme-background);
-  color: var(--b3-theme-on-background);
+  overflow: hidden;
 }
 
 .siyuan-addon-chat__header {
   align-items: center;
-  border-bottom: 1px solid var(--b3-theme-surface-lighter);
-  display: flex;
-  gap: 8px;
-  justify-content: space-between;
-  padding: 10px 12px;
+  border-bottom: 1px solid var(--saa-border);
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, auto);
+  min-height: 64px;
+  padding: 12px;
+}
+
+.siyuan-addon-chat__identity {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
 }
 
 .siyuan-addon-chat__title,
 .siyuan-addon-settings__title {
+  color: var(--saa-text);
   font-size: 15px;
-  font-weight: 600;
-  letter-spacing: 0;
+  font-weight: 650;
+  line-height: 1.25;
+  min-width: 0;
+}
+
+.siyuan-addon-chat__subtitle,
+.siyuan-addon-settings__desc {
+  color: var(--saa-muted);
+  font-size: 12px;
+  line-height: 1.45;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .siyuan-addon-chat__header-actions {
   align-items: center;
   display: flex;
   gap: 6px;
+  justify-content: flex-end;
   min-width: 0;
 }
 
-.siyuan-addon-icon-button {
+.siyuan-addon-icon-button,
+.siyuan-addon-message__button {
+  align-items: center;
   background: transparent;
-  border: 1px solid var(--b3-theme-surface-lighter);
-  border-radius: 6px;
-  color: var(--b3-theme-on-surface);
+  border: 1px solid transparent;
+  border-radius: var(--saa-radius-sm);
+  color: var(--saa-muted);
   cursor: pointer;
+  display: inline-flex;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  gap: 6px;
+  justify-content: center;
+  line-height: 1.4;
+  min-height: 28px;
   padding: 4px 8px;
+  transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease;
+  white-space: nowrap;
 }
 
-.siyuan-addon-icon-button:hover {
-  background: var(--b3-list-hover);
+.siyuan-addon-icon-button:hover,
+.siyuan-addon-message__button:hover {
+  background: var(--saa-surface-2);
+  border-color: var(--saa-border);
+  color: var(--saa-text);
 }
 
-.siyuan-addon-icon-button:disabled {
+.siyuan-addon-icon-button:focus-visible,
+.siyuan-addon-message__button:focus-visible,
+.siyuan-addon-doc-link:focus-visible,
+.siyuan-addon-references__name:focus-visible,
+.siyuan-addon-references__path:focus-visible,
+.siyuan-addon-skill-palette__item:focus-visible,
+.siyuan-addon-chat .b3-button:focus-visible,
+.siyuan-addon-settings .b3-button:focus-visible,
+.siyuan-addon-chat .b3-select:focus-visible,
+.siyuan-addon-settings .b3-select:focus-visible,
+.siyuan-addon-chat .b3-text-field:focus-visible,
+.siyuan-addon-settings .b3-text-field:focus-visible {
+  outline: 2px solid var(--saa-accent);
+  outline-offset: 2px;
+}
+
+.siyuan-addon-icon-button:disabled,
+.siyuan-addon-message__button:disabled {
   cursor: not-allowed;
-  opacity: 0.5;
+  opacity: 0.48;
 }
 
 .siyuan-addon-session-picker {
   align-items: center;
   display: flex;
-  gap: 4px;
+  gap: 6px;
   min-width: 0;
 }
 
 .siyuan-addon-session-picker__select {
-  max-width: 168px;
+  max-width: 170px;
   min-width: 112px;
 }
 
 .siyuan-addon-session-picker__delete {
+  flex: 0 0 auto;
+}
+
+.siyuan-addon-chat .b3-select,
+.siyuan-addon-settings .b3-select,
+.siyuan-addon-chat .b3-text-field,
+.siyuan-addon-settings .b3-text-field {
+  background: var(--saa-surface);
+  border: 1px solid var(--saa-border);
+  border-radius: var(--saa-radius-md);
+  color: var(--saa-text);
+  min-height: 34px;
+  transition: background-color 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.siyuan-addon-chat .b3-select:hover,
+.siyuan-addon-settings .b3-select:hover,
+.siyuan-addon-chat .b3-text-field:hover,
+.siyuan-addon-settings .b3-text-field:hover {
+  border-color: var(--saa-border-strong);
+}
+
+.siyuan-addon-chat .b3-button,
+.siyuan-addon-settings .b3-button {
+  align-items: center;
+  background: var(--saa-accent);
+  border: 1px solid var(--saa-accent);
+  border-radius: var(--saa-radius-md);
+  color: #ffffff;
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 13px;
+  font-weight: 600;
+  justify-content: center;
+  min-height: 32px;
+  padding: 6px 12px;
+  transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease, transform 160ms ease;
   white-space: nowrap;
 }
 
-.siyuan-addon-chat__messages {
-  flex: 1;
-  overflow: auto;
-  padding: 12px;
+.siyuan-addon-chat .b3-button:hover,
+.siyuan-addon-settings .b3-button:hover {
+  background: var(--saa-accent-hover);
+  border-color: var(--saa-accent-hover);
 }
 
-.siyuan-addon-empty,
+.siyuan-addon-chat .b3-button:active,
+.siyuan-addon-settings .b3-button:active {
+  transform: translateY(1px);
+}
+
+.siyuan-addon-chat .b3-button:disabled,
+.siyuan-addon-settings .b3-button:disabled {
+  cursor: default;
+  opacity: 0.58;
+  transform: none;
+}
+
+.siyuan-addon-chat .b3-button--outline,
+.siyuan-addon-settings .b3-button--outline {
+  background: var(--saa-surface);
+  border-color: var(--saa-border);
+  color: var(--saa-text);
+}
+
+.siyuan-addon-chat .b3-button--outline:hover,
+.siyuan-addon-settings .b3-button--outline:hover {
+  background: var(--saa-surface-2);
+  border-color: var(--saa-border-strong);
+  color: var(--saa-text);
+}
+
+.siyuan-addon-chat .b3-button--cancel,
+.siyuan-addon-settings .b3-button--cancel {
+  background: var(--saa-danger-soft);
+  border-color: color-mix(in srgb, var(--saa-danger) 28%, transparent);
+  color: var(--saa-danger);
+}
+
+.siyuan-addon-chat .b3-button--cancel:hover,
+.siyuan-addon-settings .b3-button--cancel:hover {
+  background: color-mix(in srgb, var(--saa-danger-soft) 70%, var(--saa-danger) 12%);
+  border-color: color-mix(in srgb, var(--saa-danger) 45%, transparent);
+  color: var(--saa-danger);
+}
+
+.siyuan-addon-chat__messages {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 12px;
+  overflow: auto;
+  padding: 14px 12px;
+  scrollbar-gutter: stable;
+}
+
+.siyuan-addon-empty {
+  align-self: center;
+  background: var(--saa-surface);
+  border: 1px solid var(--saa-border);
+  border-radius: var(--saa-radius-lg);
+  color: var(--saa-muted);
+  display: grid;
+  font-size: 13px;
+  gap: 4px;
+  line-height: 1.6;
+  margin: auto 0;
+  max-width: 320px;
+  padding: 16px;
+  text-align: center;
+  width: min(100%, 320px);
+}
+
+.siyuan-addon-empty__title {
+  color: var(--saa-text);
+  font-size: 14px;
+  font-weight: 650;
+  line-height: 1.35;
+}
+
 .siyuan-addon-muted {
-  color: var(--b3-theme-on-surface);
+  color: var(--saa-muted);
   font-size: 13px;
   line-height: 1.6;
 }
 
 .siyuan-addon-archive-error {
-  background: var(--b3-theme-error-light);
-  border-radius: 6px;
-  color: var(--b3-theme-error);
+  background: var(--saa-danger-soft);
+  border: 1px solid color-mix(in srgb, var(--saa-danger) 26%, transparent);
+  border-radius: var(--saa-radius-md);
+  color: var(--saa-danger);
   font-size: 12px;
   line-height: 1.5;
-  margin-bottom: 10px;
-  padding: 8px 10px;
-}
-
-.siyuan-addon-message {
-  border-radius: 8px;
-  margin-bottom: 10px;
   padding: 9px 10px;
 }
 
-.siyuan-addon-message--user {
-  background: var(--b3-theme-primary-lightest);
+.siyuan-addon-message {
+  border-radius: var(--saa-radius-lg);
+  max-width: 100%;
+  padding: 10px;
+  position: relative;
 }
 
-.siyuan-addon-message--assistant,
+.siyuan-addon-message--user {
+  align-self: flex-end;
+  background: var(--saa-accent-soft);
+  border: 1px solid color-mix(in srgb, var(--saa-accent) 34%, transparent);
+  width: min(92%, 520px);
+}
+
+.siyuan-addon-message--assistant {
+  align-self: stretch;
+  background: var(--saa-surface);
+  border: 1px solid var(--saa-border);
+}
+
 .siyuan-addon-message--tool-status {
-  background: var(--b3-theme-surface);
-  border: 1px solid var(--b3-theme-surface-lighter);
+  align-self: stretch;
+  background: var(--saa-surface-3);
+  border: 1px dashed var(--saa-border);
 }
 
 .siyuan-addon-message__meta {
   align-items: center;
-  color: var(--b3-theme-on-surface);
+  color: var(--saa-muted);
   display: flex;
   font-size: 11px;
   gap: 8px;
   justify-content: space-between;
-  margin-bottom: 4px;
+  margin-bottom: 7px;
+  min-height: 24px;
+}
+
+.siyuan-addon-message__role {
+  align-items: center;
+  display: inline-flex;
+  gap: 6px;
+  min-width: 0;
+}
+
+.siyuan-addon-message__role-name {
+  color: var(--saa-text);
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.4;
+}
+
+.siyuan-addon-status {
+  align-items: center;
+  border: 1px solid var(--saa-border);
+  border-radius: 999px;
+  color: var(--saa-muted);
+  display: inline-flex;
+  font-size: 11px;
+  font-weight: 600;
+  gap: 5px;
+  line-height: 1.2;
+  max-width: 100%;
+  min-height: 20px;
+  padding: 2px 7px;
+  white-space: nowrap;
+}
+
+.siyuan-addon-status--streaming,
+.siyuan-addon-status--waiting-continue,
+.siyuan-addon-status--validating {
+  background: var(--saa-accent-soft);
+  border-color: color-mix(in srgb, var(--saa-accent) 42%, transparent);
+  color: var(--saa-accent);
+}
+
+.siyuan-addon-status--error,
+.siyuan-addon-status--stopped {
+  background: var(--saa-danger-soft);
+  border-color: color-mix(in srgb, var(--saa-danger) 34%, transparent);
+  color: var(--saa-danger);
+}
+
+.siyuan-addon-status--ready,
+.siyuan-addon-status--active {
+  background: var(--saa-success-soft);
+  border-color: color-mix(in srgb, var(--saa-success) 34%, transparent);
+  color: var(--saa-success);
 }
 
 .siyuan-addon-message__content {
   font-size: 13px;
-  line-height: 1.55;
-  word-break: break-word;
+  line-height: 1.6;
+  min-width: 0;
+  overflow-wrap: anywhere;
   user-select: text;
   -webkit-user-select: text;
 }
@@ -143,9 +405,11 @@
 .siyuan-addon-message__content h4,
 .siyuan-addon-message__content h5,
 .siyuan-addon-message__content h6 {
+  color: var(--saa-text);
   font-size: 14px;
-  line-height: 1.4;
-  margin: 10px 0 6px;
+  font-weight: 650;
+  line-height: 1.45;
+  margin: 12px 0 6px;
 }
 
 .siyuan-addon-message__content ul,
@@ -158,9 +422,10 @@
 
 .siyuan-addon-message__content table,
 .siyuan-addon-react__body table {
-  border-collapse: collapse;
+  border-collapse: separate;
+  border-spacing: 0;
   display: block;
-  margin: 6px 0 10px;
+  margin: 8px 0 10px;
   max-width: 100%;
   overflow: auto;
 }
@@ -169,16 +434,17 @@
 .siyuan-addon-message__content td,
 .siyuan-addon-react__body th,
 .siyuan-addon-react__body td {
-  border: 1px solid var(--b3-theme-surface-lighter);
-  padding: 5px 7px;
+  border-bottom: 1px solid var(--saa-border);
+  padding: 6px 8px;
   text-align: left;
   vertical-align: top;
 }
 
 .siyuan-addon-message__content th,
 .siyuan-addon-react__body th {
-  background: var(--b3-theme-background);
-  font-weight: 600;
+  background: var(--saa-surface-2);
+  color: var(--saa-text);
+  font-weight: 650;
 }
 
 .siyuan-addon-message__content li,
@@ -203,55 +469,57 @@
 
 .siyuan-addon-message__content blockquote,
 .siyuan-addon-react__body blockquote {
-  border-left: 3px solid var(--b3-theme-surface-lighter);
-  color: var(--b3-theme-on-surface);
-  margin: 6px 0 8px;
-  padding-left: 8px;
+  border-left: 2px solid var(--saa-accent);
+  color: var(--saa-muted);
+  margin: 8px 0 10px;
+  padding-left: 10px;
 }
 
 .siyuan-addon-message__content hr,
 .siyuan-addon-react__body hr {
   border: 0;
-  border-top: 1px solid var(--b3-theme-surface-lighter);
-  margin: 10px 0;
+  border-top: 1px solid var(--saa-border);
+  margin: 12px 0;
 }
 
 .siyuan-addon-message__content pre,
 .siyuan-addon-react__body pre {
-  background: var(--b3-theme-background);
-  border: 1px solid var(--b3-theme-surface-lighter);
-  border-radius: 6px;
-  margin: 6px 0 8px;
+  background: var(--saa-surface-3);
+  border: 1px solid var(--saa-border);
+  border-radius: var(--saa-radius-md);
+  margin: 8px 0 10px;
   overflow: auto;
-  padding: 8px;
+  padding: 10px;
 }
 
 .siyuan-addon-message__content code,
 .siyuan-addon-react__body code {
-  background: var(--b3-theme-background);
-  border-radius: 4px;
+  background: var(--saa-surface-3);
+  border: 1px solid color-mix(in srgb, var(--saa-border) 65%, transparent);
+  border-radius: var(--saa-radius-xs);
   font-family: var(--b3-font-family-code);
   font-size: 12px;
-  padding: 1px 3px;
+  padding: 1px 4px;
 }
 
 .siyuan-addon-message__content pre code,
 .siyuan-addon-react__body pre code {
   background: transparent;
+  border: 0;
   border-radius: 0;
   padding: 0;
   white-space: pre;
 }
 
 .siyuan-addon-message__content a,
-.siyuan-addon-react__body a {
-  color: var(--b3-theme-primary);
+.siyuan-addon-react__body a,
+.siyuan-addon-doc-link {
+  color: var(--saa-accent);
 }
 
 .siyuan-addon-doc-link {
   background: transparent;
   border: 0;
-  color: var(--b3-theme-primary);
   cursor: pointer;
   display: inline;
   font: inherit;
@@ -261,29 +529,32 @@
 }
 
 .siyuan-addon-doc-link:hover {
-  color: var(--b3-theme-primary-light);
+  color: var(--saa-accent-hover);
 }
 
 .siyuan-addon-message__content img,
 .siyuan-addon-react__body img {
-  border-radius: 6px;
+  border-radius: var(--saa-radius-md);
   display: block;
   height: auto;
-  margin: 6px 0 8px;
+  margin: 8px 0 10px;
   max-width: 100%;
 }
 
 .siyuan-addon-references {
-  border-top: 1px solid var(--b3-theme-surface-lighter);
-  color: var(--b3-theme-on-surface);
+  background: var(--saa-surface-3);
+  border: 1px solid var(--saa-border);
+  border-radius: var(--saa-radius-md);
+  color: var(--saa-muted);
   font-size: 12px;
-  margin-top: 8px;
-  padding-top: 8px;
+  margin-top: 10px;
+  padding: 9px 10px;
 }
 
 .siyuan-addon-references__title {
-  font-weight: 600;
-  margin-bottom: 4px;
+  color: var(--saa-text);
+  font-weight: 650;
+  margin-bottom: 5px;
 }
 
 .siyuan-addon-references__list {
@@ -292,51 +563,49 @@
 }
 
 .siyuan-addon-references__item {
-  margin: 4px 0;
+  margin: 5px 0;
 }
 
 .siyuan-addon-references__name {
   background: transparent;
   border: 0;
-  color: var(--b3-theme-on-background);
+  color: var(--saa-text);
   cursor: pointer;
   display: inline;
   font: inherit;
+  font-weight: 600;
   padding: 0;
   text-align: left;
 }
 
-.siyuan-addon-references__name:hover {
-  color: var(--b3-theme-primary);
+.siyuan-addon-references__name:hover,
+.siyuan-addon-references__path:hover {
+  color: var(--saa-accent);
   text-decoration: underline;
 }
 
 .siyuan-addon-references__source {
-  background: var(--b3-theme-background);
-  border: 1px solid var(--b3-theme-surface-lighter);
-  border-radius: 4px;
+  background: var(--saa-surface);
+  border: 1px solid var(--saa-border);
+  border-radius: 999px;
   display: inline-block;
+  font-size: 11px;
   margin-left: 6px;
-  padding: 0 4px;
+  padding: 1px 6px;
 }
 
 .siyuan-addon-references__path {
   background: transparent;
   border: 0;
-  color: var(--b3-theme-on-surface);
+  color: var(--saa-muted);
   cursor: pointer;
   display: block;
   font-family: var(--b3-font-family-code);
-  font-size: 12px;
-  margin-top: 2px;
+  font-size: 11px;
+  margin-top: 3px;
   overflow-wrap: anywhere;
   padding: 0;
   text-align: left;
-}
-
-.siyuan-addon-references__path:hover {
-  color: var(--b3-theme-primary);
-  text-decoration: underline;
 }
 
 .siyuan-addon-message__actions {
@@ -345,64 +614,62 @@
   gap: 4px;
 }
 
-.siyuan-addon-message__button {
-  background: transparent;
-  border: 0;
-  border-radius: 4px;
-  color: var(--b3-theme-primary);
-  cursor: pointer;
-  font-size: 11px;
-  line-height: 1.4;
-  padding: 1px 4px;
-}
-
-.siyuan-addon-message__button:hover {
-  background: var(--b3-list-hover);
-}
-
 .siyuan-addon-react {
-  border-top: 1px solid var(--b3-theme-surface-lighter);
-  margin-top: 8px;
-  padding-top: 6px;
+  border-top: 1px solid var(--saa-border);
+  margin-top: 10px;
+  padding-top: 8px;
 }
 
 .siyuan-addon-react__summary {
-  color: var(--b3-theme-primary);
+  color: var(--saa-accent);
   cursor: pointer;
   font-size: 12px;
+  font-weight: 650;
+  line-height: 1.4;
   user-select: none;
+}
+
+.siyuan-addon-react__summary::marker {
+  color: var(--saa-muted);
 }
 
 .siyuan-addon-react__steps {
   display: grid;
   gap: 8px;
-  margin-top: 8px;
+  margin-top: 9px;
 }
 
 .siyuan-addon-react__step {
-  background: var(--b3-theme-background);
-  border: 1px solid var(--b3-theme-surface-lighter);
-  border-radius: 6px;
-  padding: 7px;
+  background: var(--saa-surface-3);
+  border: 1px solid var(--saa-border);
+  border-radius: var(--saa-radius-md);
+  padding: 8px;
 }
 
 .siyuan-addon-react__round {
-  color: var(--b3-theme-on-surface);
+  color: var(--saa-muted);
   font-size: 11px;
-  margin-bottom: 4px;
+  font-weight: 650;
+  margin-bottom: 5px;
 }
 
 .siyuan-addon-react__line {
   display: grid;
   font-size: 12px;
-  gap: 2px;
+  gap: 3px;
   line-height: 1.5;
-  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+.siyuan-addon-react__line + .siyuan-addon-react__line {
+  border-top: 1px solid color-mix(in srgb, var(--saa-border) 70%, transparent);
+  margin-top: 7px;
+  padding-top: 7px;
 }
 
 .siyuan-addon-react__label {
-  color: var(--b3-theme-on-surface);
-  font-weight: 600;
+  color: var(--saa-muted);
+  font-weight: 650;
 }
 
 .siyuan-addon-react__body {
@@ -410,157 +677,250 @@
 }
 
 .siyuan-addon-message__pause {
-  border: 1px solid var(--b3-theme-error);
-  border-radius: 6px;
-  color: var(--b3-theme-error);
+  background: var(--saa-danger-soft);
+  border: 1px solid color-mix(in srgb, var(--saa-danger) 35%, transparent);
+  border-radius: var(--saa-radius-md);
+  color: var(--saa-danger);
   font-size: 12px;
-  margin-top: 8px;
-  padding: 6px 8px;
+  line-height: 1.5;
+  margin-top: 9px;
+  padding: 7px 9px;
 }
 
 .siyuan-addon-composer {
-  border-top: 1px solid var(--b3-theme-surface-lighter);
+  background: color-mix(in srgb, var(--saa-bg) 86%, var(--saa-surface) 14%);
+  border-top: 1px solid var(--saa-border);
+  display: grid;
+  gap: 8px;
   padding: 10px;
 }
 
 .siyuan-addon-composer__input {
-  min-height: 76px;
+  line-height: 1.55;
+  max-height: 220px;
+  min-height: 92px;
   resize: vertical;
   width: 100%;
 }
 
 .siyuan-addon-skill-chip {
   align-items: center;
-  background: var(--b3-theme-primary-lightest);
-  border: 1px solid var(--b3-theme-primary-lighter);
-  border-radius: 6px;
-  color: var(--b3-theme-on-background);
+  background: var(--saa-accent-soft);
+  border: 1px solid color-mix(in srgb, var(--saa-accent) 36%, transparent);
+  border-radius: var(--saa-radius-md);
+  color: var(--saa-text);
   display: flex;
   font-size: 12px;
   gap: 8px;
   justify-content: space-between;
-  margin-bottom: 8px;
+  min-height: 32px;
   padding: 6px 8px;
 }
 
 .siyuan-addon-skill-palette {
-  background: var(--b3-theme-surface);
-  border: 1px solid var(--b3-theme-surface-lighter);
-  border-radius: 8px;
-  box-shadow: var(--b3-dialog-shadow);
+  background: var(--saa-surface);
+  border: 1px solid var(--saa-border-strong);
+  border-radius: var(--saa-radius-lg);
+  box-shadow: var(--saa-shadow);
   display: grid;
-  gap: 2px;
-  margin-top: 8px;
-  max-height: 260px;
+  gap: 3px;
+  max-height: 280px;
   overflow: auto;
   padding: 6px;
 }
 
 .siyuan-addon-skill-palette__item {
   background: transparent;
-  border: 0;
-  border-radius: 6px;
-  color: var(--b3-theme-on-background);
+  border: 1px solid transparent;
+  border-radius: var(--saa-radius-md);
+  color: var(--saa-text);
   cursor: pointer;
   display: grid;
   gap: 3px;
-  padding: 7px 8px;
+  min-height: 48px;
+  padding: 8px 9px;
   text-align: left;
+  transition: background-color 160ms ease, border-color 160ms ease;
 }
 
 .siyuan-addon-skill-palette__item:hover,
 .siyuan-addon-skill-palette__item--active {
-  background: var(--b3-list-hover);
+  background: var(--saa-surface-2);
+  border-color: var(--saa-border);
 }
 
 .siyuan-addon-skill-palette__name {
   font-size: 13px;
-  font-weight: 600;
+  font-weight: 650;
   line-height: 1.35;
 }
 
 .siyuan-addon-skill-palette__summary,
 .siyuan-addon-skill-palette__empty {
-  color: var(--b3-theme-on-surface);
+  color: var(--saa-muted);
   font-size: 12px;
   line-height: 1.45;
 }
 
 .siyuan-addon-skill-palette__empty {
-  padding: 8px;
+  padding: 9px;
 }
 
 .siyuan-addon-composer__actions,
 .siyuan-addon-actions {
+  align-items: center;
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
   justify-content: flex-end;
-  margin-top: 8px;
 }
 
 .siyuan-addon-settings {
-  box-sizing: border-box;
+  background: var(--saa-bg);
   max-height: 620px;
   overflow: auto;
-  padding: 16px;
+  padding: 18px;
+  scrollbar-gutter: stable;
 }
 
 .siyuan-addon-settings__section {
-  border-bottom: 1px solid var(--b3-theme-surface-lighter);
-  padding: 0 0 18px;
+  display: grid;
+  gap: 12px;
+  padding: 0 0 20px;
 }
 
 .siyuan-addon-settings__section + .siyuan-addon-settings__section {
-  padding-top: 18px;
+  border-top: 1px solid var(--saa-border);
+  padding-top: 20px;
+}
+
+.siyuan-addon-settings__header {
+  display: grid;
+  gap: 4px;
+}
+
+.siyuan-addon-settings__title {
+  margin: 0;
 }
 
 .siyuan-addon-list {
   display: grid;
   gap: 8px;
-  margin-top: 10px;
 }
 
 .siyuan-addon-list__row {
   align-items: center;
-  border: 1px solid var(--b3-theme-surface-lighter);
-  border-radius: 8px;
+  background: var(--saa-surface);
+  border: 1px solid var(--saa-border);
+  border-radius: var(--saa-radius-lg);
   display: grid;
-  gap: 8px;
-  grid-template-columns: minmax(0, 1fr) auto auto auto;
-  padding: 9px;
+  gap: 10px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  padding: 10px;
+}
+
+.siyuan-addon-list__row-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
 }
 
 .siyuan-addon-list__info {
+  display: grid;
   font-size: 13px;
+  gap: 4px;
+  min-width: 0;
+}
+
+.siyuan-addon-list__title {
+  align-items: center;
+  color: var(--saa-text);
+  display: flex;
+  flex-wrap: wrap;
+  font-weight: 650;
+  gap: 6px;
+  line-height: 1.35;
   min-width: 0;
 }
 
 .siyuan-addon-list__meta {
-  color: var(--b3-theme-on-surface);
+  color: var(--saa-muted);
   font-size: 12px;
-  margin-top: 3px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
 }
 
 .siyuan-addon-field {
   display: grid;
   gap: 6px;
-  margin: 10px 0;
+  margin: 0;
 }
 
 .siyuan-addon-field span,
 .siyuan-addon-checkbox {
-  color: var(--b3-theme-on-surface);
+  color: var(--saa-muted);
   font-size: 12px;
+  font-weight: 550;
+  line-height: 1.45;
+}
+
+.siyuan-addon-checkbox {
+  align-items: center;
+  background: var(--saa-surface);
+  border: 1px solid var(--saa-border);
+  border-radius: var(--saa-radius-md);
+  display: flex;
+  gap: 8px;
+  min-height: 36px;
+  padding: 8px 10px;
+}
+
+.siyuan-addon-checkbox input {
+  flex: 0 0 auto;
 }
 
 .siyuan-addon-textarea {
-  min-height: 72px;
+  line-height: 1.5;
+  min-height: 84px;
   resize: vertical;
 }
 
 .siyuan-addon-form-errors {
-  color: var(--b3-theme-error);
+  color: var(--saa-danger);
   font-size: 12px;
+  line-height: 1.5;
   min-height: 18px;
+}
+
+@media (max-width: 420px) {
+  .siyuan-addon-chat__header {
+    grid-template-columns: 1fr;
+  }
+
+  .siyuan-addon-chat__header-actions,
+  .siyuan-addon-session-picker {
+    width: 100%;
+  }
+
+  .siyuan-addon-session-picker__select {
+    flex: 1 1 auto;
+    max-width: none;
+  }
+
+  .siyuan-addon-list__row {
+    grid-template-columns: 1fr;
+  }
+
+  .siyuan-addon-list__row-actions {
+    justify-content: flex-start;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .siyuan-addon-chat *,
+  .siyuan-addon-settings * {
+    transition: none !important;
+  }
 }

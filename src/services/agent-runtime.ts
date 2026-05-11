@@ -532,16 +532,24 @@ const rememberToolCallResult = (
 ): void => {
   const signature = toolCallSignature(tool, args);
   const previous = exactRecords.get(signature);
+  const summary = observationSummary(result);
+  if (previous && result.status === "stopped" && summary.startsWith(DUPLICATE_GUARD_PREFIX)) {
+    exactRecords.set(signature, { ...previous, count: previous.count + 1 });
+    return;
+  }
   exactRecords.set(signature, {
     count: (previous?.count || 0) + 1,
     status: result.status,
-    summary: observationSummary(result),
+    summary,
     workspaceVersion,
   });
 };
 
 const stepHitRepeatGuard = (step: ReActStep): boolean =>
   step.observations.some((observation) => observation.summary.startsWith(REPEAT_GUARD_PREFIX));
+
+const stepHitDuplicateGuard = (step: ReActStep): boolean =>
+  step.observations.some((observation) => observation.summary.startsWith(DUPLICATE_GUARD_PREFIX));
 
 const stepHasSuccessfulRead = (step: ReActStep): boolean =>
   step.actions.some((action) => {
@@ -551,6 +559,42 @@ const stepHasSuccessfulRead = (step: ReActStep): boolean =>
 
 const shouldFinalizeAfterRead = (step: ReActStep, userGoal: string, toolResults: McpToolCall[]): boolean =>
   stepHasSuccessfulRead(step) && (!requiresSuccessfulMutation(userGoal) || hasSuccessfulMutation(toolResults));
+
+const LISTING_ACTIONS = new Set(["get_child_docs", "list_tree", "tree", "search_docs", "search"]);
+
+const isInventoryIntent = (goal: string): boolean =>
+  /文档|笔记|笔记本|目录|文件树|有哪些|列出|查看|看下|梳理|workspace|document|notebook|list|tree/i.test(runtimeUserIntent(goal));
+
+const isToolHelpIntent = (goal: string): boolean =>
+  /工具.*(用法|参数|schema|help)|MCP.*(用法|参数|schema|help)|怎么调用|如何调用/i.test(runtimeUserIntent(goal));
+
+const isFinalizableListingAction = (action: ReActStep["actions"][number], userGoal: string): boolean => {
+  if (!isInventoryIntent(userGoal)) return false;
+  const args = parseArgumentSummary(action.argumentsSummary);
+  if (isMutatingCall(args, action.toolName) || isHelpArgs(args)) return false;
+  const actionName = typeof args.action === "string" ? args.action : "";
+  const path = typeof args.path === "string" ? args.path.trim() : "";
+  if (LISTING_ACTIONS.has(actionName)) return true;
+  if (actionName === "ls" && path && path !== "/") return true;
+  if (actionName === "list" && /笔记本|notebook/i.test(runtimeUserIntent(userGoal))) return true;
+  return false;
+};
+
+const stepHasSuccessfulListing = (step: ReActStep, userGoal: string): boolean =>
+  step.observations.some((observation) => observation.status === "success") &&
+  step.actions.some((action) => isFinalizableListingAction(action, userGoal));
+
+const shouldFinalizeAfterListing = (step: ReActStep, userGoal: string, toolResults: McpToolCall[]): boolean =>
+  stepHasSuccessfulListing(step, userGoal) && (!requiresSuccessfulMutation(userGoal) || hasSuccessfulMutation(toolResults));
+
+const hasSuccessfulListingResult = (toolResults: McpToolCall[], userGoal: string): boolean =>
+  isInventoryIntent(userGoal) &&
+  toolResults.some((result) => {
+    if (result.status !== "success") return false;
+    const args = parseArgumentSummary(result.argumentsSummary || "{}");
+    const actionName = typeof args.action === "string" ? args.action : "";
+    return actionName === "ls" || LISTING_ACTIONS.has(actionName);
+  });
 
 const preflightToolArgs = (
   tool: McpTool,
@@ -592,6 +636,57 @@ const shouldUseHelpForEmptyArgs = (
   args: Record<string, unknown>,
   helpedTools: Set<string>,
 ): boolean => Object.keys(args).length === 0 && actionValuesForTool(tool).includes("help") && !helpedTools.has(tool.llmName);
+
+const suggestedInventoryArgs = (tool: McpTool, userGoal: string): Record<string, unknown> | undefined => {
+  if (!isInventoryIntent(userGoal) || isToolHelpIntent(userGoal)) return undefined;
+  const toolName = tool.llmName.toLowerCase();
+  const actions = actionValuesForTool(tool).filter((action) => action !== "help");
+  if (/_notebook\b|notebook/.test(toolName) && actions.includes("list")) return { action: "list" };
+  if (/_fs\b|fs/.test(toolName)) {
+    if (actions.includes("ls")) return { action: "ls", path: "/" };
+    if (actions.includes("tree")) return { action: "tree", path: "/", maxDepth: 2 };
+  }
+  return undefined;
+};
+
+const normalizeInitialToolArgs = (
+  tool: McpTool,
+  args: Record<string, unknown>,
+  helpedTools: Set<string>,
+  userGoal: string,
+): Record<string, unknown> => {
+  const suggestion = suggestedInventoryArgs(tool, userGoal);
+  if (suggestion && (Object.keys(args).length === 0 || isHelpArgs(args))) return suggestion;
+  return shouldUseHelpForEmptyArgs(tool, args, helpedTools) ? { action: "help" } : args;
+};
+
+const rootListingChildPath = (summary: string): string | undefined => {
+  const parsed = parseToolOutputJson(summary);
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return undefined;
+  const items = (parsed as { items?: unknown }).items;
+  if (!Array.isArray(items) || items.length !== 1) return undefined;
+  const [item] = items;
+  if (!item || typeof item !== "object") return undefined;
+  const path = (item as { path?: unknown }).path;
+  const children = (item as { children?: unknown }).children;
+  return typeof path === "string" && path !== "/" && path.trim() && typeof children === "number" && children > 0
+    ? path.trim()
+    : undefined;
+};
+
+const repeatedRootListingArgs = (
+  tool: McpTool,
+  args: Record<string, unknown>,
+  exactRecords: Map<string, ToolCallRecord>,
+  workspaceVersion: number,
+): Record<string, unknown> | undefined => {
+  if (!/_fs\b|fs/i.test(tool.llmName)) return undefined;
+  if (args.action !== "ls" || args.path !== "/") return undefined;
+  const previous = exactRecords.get(toolCallSignature(tool, args));
+  if (!previous || previous.status !== "success" || previous.workspaceVersion !== workspaceVersion) return undefined;
+  const childPath = rootListingChildPath(previous.summary);
+  return childPath ? { action: "ls", path: childPath } : undefined;
+};
 
 const latestUserGoal = (messages: ChatMessage[]): string =>
   [...messages]
@@ -687,6 +782,7 @@ const finalAnswerFromHistory = async (
       reason,
       "现在禁止继续调用工具。请只基于上面的对话与 ReAct 历史给出最终回答。",
       "如果上一轮对话或 Observation 已经出现明确 path，就说明应读取哪个文档或给出当前可判断的内容。",
+      "注意：notebook.list 只能证明笔记本存在和打开状态，不能证明内容可读；fs.ls \"/\" 才代表当前 MCP 文件接口可读的笔记本根。遇到 permission_denied 必须说明受限，不要写成有访问权限。",
       "如果无法唯一确定，就直接说无法唯一确定，并列出最可能的候选路径；不要再次建议泛搜同一个关键词。",
     ].join("\n"),
   );
@@ -769,9 +865,9 @@ export class AgentRuntime {
       for (const request of latest.toolRequests) {
         const tool = input.tools.find((candidate) => candidate.llmName === request.name);
         if (!tool) continue;
-        let effectiveArguments = shouldUseHelpForEmptyArgs(tool, request.arguments, helpedTools)
-          ? { action: "help" }
-          : request.arguments;
+        let effectiveArguments = normalizeInitialToolArgs(tool, request.arguments, helpedTools, userGoal);
+        effectiveArguments =
+          repeatedRootListingArgs(tool, effectiveArguments, exactToolCallRecords, workspaceVersion) || effectiveArguments;
         const needsArgumentRepair =
           helpedTools.has(tool.llmName) && (Object.keys(effectiveArguments).length === 0 || isHelpArgs(effectiveArguments));
         if (needsArgumentRepair) {
@@ -838,6 +934,20 @@ export class AgentRuntime {
         return { status: "final", content, toolResults, completedRounds, reactHistory };
       }
 
+      if (stepHitDuplicateGuard(step) && hasSuccessfulListingResult(toolResults, userGoal)) {
+        const content = finalizeAgentContent(
+          await finalAnswerFromHistory(
+            input.profile,
+            runtimeMessages,
+            input.signal,
+            "检测到模型正在重复调用已经成功的目录枚举工具。现在必须停止继续调用工具，基于已有 Observation 总结当前可见的文档结构和访问受限项。",
+          ),
+          toolResults,
+        );
+        handlers.onText(content);
+        return { status: "final", content, toolResults, completedRounds, reactHistory };
+      }
+
       if (requiresSuccessfulMutation(userGoal) && stepHasSuccessfulMutation(step)) {
         const content = finalizeAgentContent(
           await finalAnswerFromHistory(
@@ -866,15 +976,32 @@ export class AgentRuntime {
         return { status: "final", content, toolResults, completedRounds, reactHistory };
       }
 
-      if (segmentRound === REACT_SEGMENT_ROUNDS - 1) {
-        return {
-          status: "paused",
-          content: latest.content,
+      if (shouldFinalizeAfterListing(step, userGoal, toolResults)) {
+        const content = finalizeAgentContent(
+          await finalAnswerFromHistory(
+            input.profile,
+            runtimeMessages,
+            input.signal,
+            "已经成功拿到用户要求的文档列表、目录树或文档候选。现在应基于已有 Observation 总结当前可见的文档范围、关键路径和访问受限项，不要继续调用工具。",
+          ),
           toolResults,
-          completedRounds,
-          reactHistory,
-          pauseReason: REACT_PAUSE_MESSAGE,
-        };
+        );
+        handlers.onText(content);
+        return { status: "final", content, toolResults, completedRounds, reactHistory };
+      }
+
+      if (segmentRound === REACT_SEGMENT_ROUNDS - 1) {
+        const content = finalizeAgentContent(
+          await finalAnswerFromHistory(
+            input.profile,
+            runtimeMessages,
+            input.signal,
+            "已经达到默认思考轮次上限。现在必须根据已有 Observation 给出当前最完整回答，说明已完成、受限和无法继续确认的部分，不要再要求用户点击继续。",
+          ),
+          toolResults,
+        );
+        handlers.onText(content);
+        return { status: "final", content, toolResults, completedRounds, reactHistory };
       }
 
       latest = await streamChatCompletion(input.profile, runtimeMessages, {
@@ -884,13 +1011,16 @@ export class AgentRuntime {
       });
     }
 
-    return {
-      status: "paused",
-      content: latest.content,
+    const content = finalizeAgentContent(
+      await finalAnswerFromHistory(
+        input.profile,
+        runtimeMessages,
+        input.signal,
+        "已经达到默认思考轮次上限。现在必须根据已有 Observation 给出当前最完整回答，说明已完成、受限和无法继续确认的部分，不要再要求用户点击继续。",
+      ),
       toolResults,
-      completedRounds,
-      reactHistory,
-      pauseReason: REACT_PAUSE_MESSAGE,
-    };
+    );
+    handlers.onText(content);
+    return { status: "final", content, toolResults, completedRounds, reactHistory };
   }
 }

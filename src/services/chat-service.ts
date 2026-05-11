@@ -297,15 +297,17 @@ export class ChatService {
       const archives = await this.options.archiveStore.listArchives();
       let next = { ...this.session, archives, archiveStatus: "ready" as const, archiveError: undefined };
       if (next.messages.length === 0 && archives.length > 0) {
-        const doc = await this.options.archiveStore.loadArchive(archives[0].conversationId);
-        next = {
-          ...next,
-          conversationId: doc.conversationId,
-          messages: doc.messages,
-          toolCalls: [],
-          continuation: undefined,
-          generationId: undefined,
-        };
+        const loaded = await this.loadFirstAvailableArchive(archives);
+        if (loaded) {
+          next = {
+            ...next,
+            conversationId: loaded.conversationId,
+            messages: loaded.messages,
+            toolCalls: [],
+            continuation: undefined,
+            generationId: undefined,
+          };
+        }
       }
       this.session = next;
       this.emit();
@@ -313,6 +315,17 @@ export class ChatService {
       this.session = { ...this.session, archiveStatus: "error", archiveError: safeErrorText(error) };
       this.emit();
     }
+  }
+
+  private async loadFirstAvailableArchive(archives: ChatSession["archives"]) {
+    for (const archive of archives) {
+      try {
+        return await this.options.archiveStore?.loadArchive(archive.conversationId);
+      } catch {
+        // Keep the archive list usable even when one stale entry points at a missing file.
+      }
+    }
+    return undefined;
   }
 
   async switchArchive(conversationId: string): Promise<void> {
