@@ -75,14 +75,31 @@ const createLlmToolName = (server: McpServerConfig, toolName: string): string =>
 const isMcpErrorResult = (result: unknown): boolean =>
   typeof result === "object" && result !== null && (result as { isError?: unknown }).isError === true;
 
+const MCP_SESSION_RECONNECT_DELAY_MS = 120;
+
+const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+const isRecoverableMcpSessionError = (error: unknown): boolean => {
+  const text = safeErrorText(error);
+  return /Server not initialized|Mcp-Session-Id header is required|No valid session ID|Invalid session ID|session.*(?:expired|invalid|not found)|not initialized/i.test(
+    text,
+  );
+};
+
 const summarizeToolResult = (tool: McpTool, args: Record<string, unknown>, result: unknown): string => {
   const action = typeof args.action === "string" ? args.action : "";
   const limit = action === "read" || action === "get_doc" ? 12000 : action === "fulltext" || action === "search" ? 5000 : 2000;
   return summarizeJson(result, limit);
 };
 
+type ManagedMcpConnection = {
+  connection: ConnectedMcpServer;
+  fingerprint: string;
+  server: McpServerConfig;
+};
+
 export class McpService {
-  private connections = new Map<string, { connection: ConnectedMcpServer; fingerprint: string }>();
+  private connections = new Map<string, ManagedMcpConnection>();
   private pendingDiscoveries = new Map<string, Promise<{ server: McpServerConfig; tools: McpTool[] }>>();
   private generations = new Map<string, number>();
   private tools = new Map<string, McpTool[]>();
@@ -120,7 +137,15 @@ export class McpService {
         connection = await connectMcpServer(server);
         ownsNewConnection = true;
       }
-      const rawTools = await connection.listTools();
+      let rawTools: Awaited<ReturnType<ConnectedMcpServer["listTools"]>>;
+      try {
+        rawTools = await connection.listTools();
+      } catch (error) {
+        if (!isRecoverableMcpSessionError(error)) throw error;
+        connection = await this.reconnectAfterSessionLoss(server, connection);
+        ownsNewConnection = true;
+        rawTools = await connection.listTools();
+      }
       if ((this.generations.get(server.id) || 0) !== generation) {
         if (ownsNewConnection) await connection.close().catch(() => undefined);
         return { server: { ...nextServer, status: "idle", updatedAt: nowIso() }, tools: [] };
@@ -132,11 +157,15 @@ export class McpService {
         inputSchema: tool.inputSchema,
         llmName: createLlmToolName(server, tool.name),
       }));
-      this.connections.set(server.id, { connection, fingerprint });
+      this.connections.set(server.id, { connection, fingerprint, server });
       this.tools.set(server.id, tools);
       return { server: { ...nextServer, status: "ready", updatedAt: nowIso() }, tools };
     } catch (error) {
-      if (ownsNewConnection && connection) await connection.close().catch(() => undefined);
+      if (connection && (ownsNewConnection || isRecoverableMcpSessionError(error))) {
+        await connection.close().catch(() => undefined);
+        this.connections.delete(server.id);
+        this.tools.delete(server.id);
+      }
       return {
         server: { ...nextServer, status: "error", lastError: safeErrorText(error), updatedAt: nowIso() },
         tools: [],
@@ -157,7 +186,15 @@ export class McpService {
     try {
       const managed = this.connections.get(tool.serverId);
       if (!managed) throw new Error("MCP 未连接");
-      const result = await managed.connection.callTool(tool.name, args);
+      let result: unknown;
+      try {
+        result = await managed.connection.callTool(tool.name, args);
+      } catch (error) {
+        if (!isRecoverableMcpSessionError(error)) throw error;
+        const connection = await this.reconnectAfterSessionLoss(managed.server, managed.connection);
+        this.connections.set(tool.serverId, { ...managed, connection });
+        result = await connection.callTool(tool.name, args);
+      }
       if (generationId.endsWith(":stopped")) {
         return { ...call, status: "stopped", finishedAt: nowIso() };
       }
@@ -166,6 +203,12 @@ export class McpService {
       }
       return { ...call, status: "success", finishedAt: nowIso(), outputSummary: summarizeToolResult(tool, args, result) };
     } catch (error) {
+      if (isRecoverableMcpSessionError(error)) {
+        const managed = this.connections.get(tool.serverId);
+        this.connections.delete(tool.serverId);
+        this.tools.delete(tool.serverId);
+        if (managed) await managed.connection.close().catch(() => undefined);
+      }
       return { ...call, status: "error", finishedAt: nowIso(), error: safeErrorText(error) };
     }
   }
@@ -189,6 +232,13 @@ export class McpService {
 
   private bumpGeneration(serverId: string): void {
     this.generations.set(serverId, (this.generations.get(serverId) || 0) + 1);
+  }
+
+  private async reconnectAfterSessionLoss(server: McpServerConfig, connection?: ConnectedMcpServer): Promise<ConnectedMcpServer> {
+    if (connection) await connection.close().catch(() => undefined);
+    this.connections.delete(server.id);
+    await delay(MCP_SESSION_RECONNECT_DELAY_MS);
+    return connectMcpServer(server);
   }
 
   private connectionFingerprint(server: McpServerConfig): string {
