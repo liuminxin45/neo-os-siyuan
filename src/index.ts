@@ -7,6 +7,8 @@ import { McpService } from "./services/mcp-service";
 import { SiyuanSkillIndexReader } from "./services/siyuan-skill-index";
 import { SiyuanChatArchiveStore } from "./services/siyuan-chat-archive";
 import { SiyuanDocumentOpener } from "./services/siyuan-document-opener";
+import { LlmWikiKernel } from "./services/llm-wiki-kernel";
+import { SiyuanKnowledgeStore } from "./services/siyuan-knowledge-store";
 import { getActiveProfile } from "./services/llm-profile-service";
 
 const DOCK_TYPE = "siyuan-addon-ai-chat";
@@ -18,6 +20,7 @@ export default class SiyuanAddonPlugin extends Plugin {
   private skillIndexReader?: SiyuanSkillIndexReader;
   private chatArchiveStore?: SiyuanChatArchiveStore;
   private documentOpener?: SiyuanDocumentOpener;
+  private llmWikiKernel?: LlmWikiKernel;
   private chatService?: ChatService;
   private chatDock?: ChatDock;
 
@@ -30,9 +33,14 @@ export default class SiyuanAddonPlugin extends Plugin {
     this.skillIndexReader = new SiyuanSkillIndexReader();
     this.chatArchiveStore = new SiyuanChatArchiveStore();
     this.documentOpener = new SiyuanDocumentOpener(this.app);
+    this.llmWikiKernel = new LlmWikiKernel({
+      store: new SiyuanKnowledgeStore(),
+      getSettings: () => this.settingsStore?.get().llmWiki,
+    });
     this.chatService = new ChatService({
       mcpService: this.mcpService,
       archiveStore: this.chatArchiveStore,
+      llmWikiKernel: this.llmWikiKernel,
       getActiveProfile: () => {
         const settings = this.settingsStore?.get();
         return settings ? getActiveProfile(settings.llmProfiles, settings.activeProfileId) : undefined;

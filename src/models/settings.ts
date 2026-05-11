@@ -1,6 +1,8 @@
 import type { LlmProfile } from "./llm";
 import type { McpServerConfig, McpTool } from "./mcp";
 import type { AgentMode } from "./agent";
+import type { LlmWikiSettings } from "./llm-wiki";
+import { defaultLlmWikiSettings } from "./llm-wiki";
 
 export type MaxMemoryTurns = 5 | 10 | 20 | 30;
 
@@ -12,6 +14,7 @@ export interface PluginSettings {
   mcpToolCache?: Record<string, McpTool[]>;
   agentMode?: AgentMode;
   maxMemoryTurns?: MaxMemoryTurns;
+  llmWiki: LlmWikiSettings;
 }
 
 export const SETTINGS_STORAGE_KEY = "settings";
@@ -27,4 +30,5 @@ export const defaultSettings = (): PluginSettings => ({
   mcpToolCache: {},
   agentMode: "react",
   maxMemoryTurns: DEFAULT_MAX_MEMORY_TURNS,
+  llmWiki: defaultLlmWikiSettings(),
 });

@@ -8,6 +8,7 @@ export interface ChatMessage {
   id: string;
   role: ChatRole;
   content: string;
+  runtimeContent?: string;
   createdAt: string;
   status: ChatMessageStatus;
   toolCallId?: string;

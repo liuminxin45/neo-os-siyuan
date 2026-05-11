@@ -11,6 +11,8 @@ import {
   type PluginSettings,
 } from "../models/settings";
 import { normalizeAgentMode } from "../models/agent";
+import { normalizeLlmWikiSettings } from "../models/llm-wiki";
+import type { LlmWikiSettings } from "../models/llm-wiki";
 
 const normalizeMaxMemoryTurns = (value: unknown): MaxMemoryTurns =>
   MAX_MEMORY_TURN_OPTIONS.includes(value as MaxMemoryTurns) ? (value as MaxMemoryTurns) : DEFAULT_MAX_MEMORY_TURNS;
@@ -30,6 +32,7 @@ const normalizeSettings = (raw: Partial<PluginSettings> | null | undefined): Plu
     mcpToolCache: raw?.mcpToolCache || fallback.mcpToolCache,
     agentMode: normalizeAgentMode(raw?.agentMode),
     maxMemoryTurns: normalizeMaxMemoryTurns(raw?.maxMemoryTurns),
+    llmWiki: normalizeLlmWikiSettings(raw?.llmWiki || fallback.llmWiki),
   };
 };
 
@@ -74,7 +77,16 @@ export class SettingsStore {
     });
   }
 
+  async removeToolCache(serverId: string): Promise<PluginSettings> {
+    const { [serverId]: _removed, ...mcpToolCache } = this.settings.mcpToolCache || {};
+    return this.save({ ...this.settings, mcpToolCache });
+  }
+
   async setMaxMemoryTurns(maxMemoryTurns: MaxMemoryTurns): Promise<PluginSettings> {
     return this.save({ ...this.settings, maxMemoryTurns });
+  }
+
+  async setLlmWikiSettings(llmWiki: LlmWikiSettings): Promise<PluginSettings> {
+    return this.save({ ...this.settings, llmWiki });
   }
 }

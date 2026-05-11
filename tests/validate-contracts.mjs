@@ -76,12 +76,27 @@ const settings = {
   },
   agentMode: "react",
   maxMemoryTurns: 10,
+  llmWiki: {
+    enabled: true,
+    notebookName: "LLM-Wiki",
+    writeMode: "auto-safe",
+    language: "zh-CN",
+    allowedMcpServerIds: [],
+    toolAllowlist: [],
+  },
 };
 
 const chatSession = {
   conversationId: "conv_1778307810068_5jot5q",
   messages: [
-    { id: "msg_user", role: "user", content: "查一下", createdAt: now, status: "complete" },
+    {
+      id: "msg_user",
+      role: "user",
+      content: "查一下",
+      runtimeContent: "LLM-WIKI KNOWLEDGE KERNEL CONTEXT\n\n查一下",
+      createdAt: now,
+      status: "complete",
+    },
     {
       id: "msg_assistant",
       role: "assistant",

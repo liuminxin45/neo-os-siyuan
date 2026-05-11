@@ -11,6 +11,7 @@ import type { McpService } from "../services/mcp-service";
 import type { LlmProfile, LlmProfileDraft } from "../models/llm";
 import type { McpServerConfig, McpServerDraft, McpTransportType } from "../models/mcp";
 import { MAX_MEMORY_TURN_OPTIONS, type MaxMemoryTurns } from "../models/settings";
+import { LLM_WIKI_DEFAULT_NOTEBOOK, type LlmWikiWriteMode } from "../models/llm-wiki";
 import { maskSecret } from "../utils/masks";
 import { createElement } from "./render";
 
@@ -39,7 +40,7 @@ export class SettingsModal {
     const root = this.dialog?.element.querySelector(".siyuan-addon-settings") as HTMLElement | null;
     if (!root) return;
     root.innerHTML = "";
-    root.append(this.renderLlmSection(), this.renderMemorySection(), this.renderMcpSection());
+    root.append(this.renderLlmSection(), this.renderMemorySection(), this.renderLlmWikiSection(), this.renderMcpSection());
   }
 
   private renderLlmSection(): HTMLElement {
@@ -123,6 +124,63 @@ export class SettingsModal {
     return section;
   }
 
+  private renderLlmWikiSection(): HTMLElement {
+    const settings = this.options.store.get();
+    const section = createElement("section", "siyuan-addon-settings__section");
+    section.append(createElement("h2", "siyuan-addon-settings__title", "LLM-Wiki 知识库"));
+
+    const enabled = document.createElement("label");
+    enabled.className = "siyuan-addon-checkbox";
+    const enabledInput = document.createElement("input");
+    enabledInput.type = "checkbox";
+    enabledInput.checked = settings.llmWiki.enabled;
+    enabled.append(enabledInput, " 启用知识库内核");
+
+    const notebookName = this.input("笔记本名称", settings.llmWiki.notebookName || LLM_WIKI_DEFAULT_NOTEBOOK);
+    const writeMode = this.select(
+      "写入模式",
+      [
+        { label: "自动新增/更新，阻止高风险操作", value: "auto-safe" },
+        { label: "先输出变更草案", value: "draft-first" },
+        { label: "只读", value: "read-only" },
+      ],
+      settings.llmWiki.writeMode,
+    );
+    const allowedServers = this.textarea("允许的 MCP Server ID（每行一个；留空表示全部）", settings.llmWiki.allowedMcpServerIds.join("\n"));
+    const allowedTools = this.textarea("允许的 MCP Tool 名称（每行一个；留空表示全部）", settings.llmWiki.toolAllowlist.join("\n"));
+    const hint = createElement(
+      "p",
+      "siyuan-addon-muted",
+      "默认使用 /LLM-Wiki/AGENTS、wiki、raw、skills、runs 五层核心结构；auto-safe 会允许创建/追加/更新，阻止删除、移动、重命名。",
+    );
+    const save = createElement("button", "b3-button", "保存知识库设置");
+    save.addEventListener("click", async () => {
+      await this.options.store.setLlmWikiSettings({
+        enabled: enabledInput.checked,
+        notebookName: notebookName.value.trim() || LLM_WIKI_DEFAULT_NOTEBOOK,
+        writeMode: writeMode.value as LlmWikiWriteMode,
+        language: "zh-CN",
+        allowedMcpServerIds: this.listFromTextarea(allowedServers.value),
+        toolAllowlist: this.listFromTextarea(allowedTools.value),
+      });
+      this.options.onSettingsChanged();
+      showMessage("LLM-Wiki 设置已保存");
+      this.render();
+    });
+    const actions = createElement("div", "siyuan-addon-actions");
+    actions.append(save);
+    section.append(
+      hint,
+      enabled,
+      notebookName.parentElement!,
+      writeMode.parentElement!,
+      allowedServers.parentElement!,
+      allowedTools.parentElement!,
+      actions,
+    );
+    return section;
+  }
+
   private renderLlmForm(draft: LlmProfileDraft, existing?: LlmProfile): void {
     const root = this.dialog?.element.querySelector(".siyuan-addon-settings") as HTMLElement | null;
     if (!root) return;
@@ -195,7 +253,9 @@ export class SettingsModal {
       edit.addEventListener("click", () => this.renderMcpForm(cloneServerToDraft(server), server));
       const remove = createElement("button", "b3-button b3-button--cancel", "删除");
       remove.addEventListener("click", async () => {
+        await this.options.mcpService.closeServer(server.id);
         await this.options.store.setMcpServers(settings.mcpServers.filter((item) => item.id !== server.id));
+        await this.options.store.removeToolCache(server.id);
         this.options.onSettingsChanged();
         this.render();
       });
@@ -260,11 +320,16 @@ export class SettingsModal {
         return;
       }
       const settings = this.options.store.get();
-      const server = materializeMcpServer(nextDraft, existing);
+      const materialized = materializeMcpServer(nextDraft, existing);
+      const server = existing ? { ...materialized, status: "idle" as const } : materialized;
       const servers = existing
         ? settings.mcpServers.map((item) => (item.id === existing.id ? server : item))
         : [...settings.mcpServers, server];
       await this.options.store.setMcpServers(servers);
+      if (existing) {
+        await this.options.mcpService.closeServer(existing.id);
+        await this.options.store.removeToolCache(existing.id);
+      }
       this.options.onSettingsChanged();
       this.render();
     });
@@ -328,5 +393,9 @@ export class SettingsModal {
     textarea.value = value;
     label.append(span, textarea);
     return textarea;
+  }
+
+  private listFromTextarea(value: string): string[] {
+    return [...new Set(value.split(/[\n,]/).map((item) => item.trim()).filter(Boolean))];
   }
 }

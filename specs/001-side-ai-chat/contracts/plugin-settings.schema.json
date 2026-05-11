@@ -24,6 +24,25 @@
       }
     },
     "agentMode": { "enum": ["react", "reflection", "plan-and-execute"] },
-    "maxMemoryTurns": { "enum": [5, 10, 20, 30] }
+    "maxMemoryTurns": { "enum": [5, 10, 20, 30] },
+    "llmWiki": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled", "notebookName", "writeMode", "language", "allowedMcpServerIds", "toolAllowlist"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "notebookName": { "type": "string", "minLength": 1 },
+        "writeMode": { "enum": ["auto-safe", "draft-first", "read-only"] },
+        "language": { "const": "zh-CN" },
+        "allowedMcpServerIds": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "toolAllowlist": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    }
   }
 }
