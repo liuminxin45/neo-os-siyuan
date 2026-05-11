@@ -159,7 +159,8 @@ const readIntentSignature = (tool: McpTool, args: Record<string, unknown>): stri
       : typeof args.id === "string"
         ? args.id.trim()
         : "";
-  return target ? `${tool.llmName}:${action}:${target}` : undefined;
+  const page = typeof args.page === "number" || typeof args.page === "string" ? String(args.page).trim() : "1";
+  return target ? `${tool.llmName}:${action}:${target}:page=${page || "1"}` : undefined;
 };
 
 const MUTATING_ACTIONS = new Set([
@@ -461,6 +462,47 @@ const mutationContentError = (args: Record<string, unknown>, userGoal: string): 
   return undefined;
 };
 
+const isAutoIngestRuntimeGoal = (userGoal: string): boolean => /(?:^|\n|\/|已选 skill：)auto-ingest\b/i.test(userGoal);
+
+const isCareerExperienceGoal = (userGoal: string): boolean =>
+  /升职|晋升|任命|岗位|职位|职业|工作|团队|小组长|负责人|leader|lead|promotion|career/i.test(userGoal);
+
+const leafNameFromPath = (path: string): string => {
+  const normalized = path.replace(/\\/g, "/").replace(/\/+$/, "");
+  const leaf = normalized.split("/").filter(Boolean).pop();
+  return leaf || "auto-ingest-record";
+};
+
+const normalizeAutoIngestWriteArgs = (
+  tool: McpTool,
+  args: Record<string, unknown>,
+  userGoal: string,
+): Record<string, unknown> | undefined => {
+  if (!isAutoIngestRuntimeGoal(userGoal) || !/_fs\b|fs/i.test(tool.llmName)) return undefined;
+  if (args.action !== "write" && args.action !== "create" && args.action !== "replace") return undefined;
+  const path = typeof args.path === "string" ? args.path.trim().replace(/\\/g, "/") : "";
+  if (!path) return undefined;
+  const targetLayerMatch = path.match(/^\/?LLM-Wiki\/(raw|wiki)\//i);
+  const oldNeoPath = /^\/?04-memory\/raw\//i.test(path);
+  const missingAutoIngestParent = /^\/?LLM-Wiki\/(?:raw|wiki)\/sources(?:\/auto-ingest)?\//i.test(path);
+  const bucket = isCareerExperienceGoal(userGoal) ? "experience" : "knowledge";
+  if (!targetLayerMatch && !oldNeoPath) return undefined;
+  if (!missingAutoIngestParent && !oldNeoPath) return undefined;
+  const layer = targetLayerMatch?.[1]?.toLowerCase() || "raw";
+  return { ...args, path: `/LLM-Wiki/${layer}/${bucket}/${leafNameFromPath(path)}` };
+};
+
+const mutationRequirementMessage = (userGoal: string, reason: string): string =>
+  [
+    reason,
+    "执行约束未满足：用户选择了 skill 或 LLM-Wiki 写入流程，并且目标包含记录/保存/写入意图，但当前还没有任何成功的 MCP 写入类调用。",
+    "不能让用户再选择 A/B/C，也不能说“已记录”或“已保存”。必须继续通过 MCP 工具完成实际写入。",
+    "如果 skill 主流程与用户目标不完全匹配，应在 auto-safe 边界内自动选择合适的 LLM-Wiki 路径记录明确事实，并在最终回答中说明处理方式。",
+    "优先写入可复用结论到 /LLM-Wiki/wiki/；必要时先把原始事实写入 /LLM-Wiki/raw/，再写 wiki 摘要。路径必须是具体文档，不要以 / 结尾。",
+    "如果 Observation 显示 Parent document not found，说明父目录不存在；不要请求用户确认路径，应改用当前已存在的 LLM-Wiki 父目录继续写入。例如职业/升职/团队里程碑写 /LLM-Wiki/raw/experience/<slug> 和 /LLM-Wiki/wiki/experience/<slug>。",
+    `用户目标：${runtimeUserIntent(userGoal)}`,
+  ].join("\n");
+
 const isRetryableSummary = (summary: string): boolean =>
   /retry|timeout|temporar|closed-or-initializing|initializing|rate limit|429|5\d\d|稍后|重试|初始化|超时|暂时/i.test(summary);
 
@@ -565,8 +607,26 @@ const LISTING_ACTIONS = new Set(["get_child_docs", "list_tree", "tree", "search_
 const isInventoryIntent = (goal: string): boolean =>
   /文档|笔记|笔记本|目录|文件树|有哪些|列出|查看|看下|梳理|workspace|document|notebook|list|tree/i.test(runtimeUserIntent(goal));
 
+const isSkillInventoryIntent = (goal: string): boolean =>
+  /技能|能力|skills?\b/i.test(runtimeUserIntent(goal)) && /有哪些|有什么|列出|查看|看下|清单|list|show|what/i.test(runtimeUserIntent(goal));
+
 const isToolHelpIntent = (goal: string): boolean =>
   /工具.*(用法|参数|schema|help)|MCP.*(用法|参数|schema|help)|怎么调用|如何调用/i.test(runtimeUserIntent(goal));
+
+const isSkillListingPath = (path: string): boolean =>
+  /^\/?(?:LLM-Wiki\/)?skills(?:\/|$)/i.test(path.trim().replace(/\\/g, "/"));
+
+const isWorkspaceRootListingPath = (path: string): boolean => {
+  const normalized = path.trim().replace(/\\/g, "/").replace(/\/+$/, "") || "/";
+  return normalized === "/" || /^\/?LLM-Wiki$/i.test(normalized);
+};
+
+const isFinalizableSkillListingAction = (args: Record<string, unknown>, actionName: string): boolean => {
+  const path = typeof args.path === "string" ? args.path.trim() : "";
+  if (path && isSkillListingPath(path)) return true;
+  if (actionName === "tree" && /^\/?LLM-Wiki\/?$/i.test(path)) return true;
+  return false;
+};
 
 const isFinalizableListingAction = (action: ReActStep["actions"][number], userGoal: string): boolean => {
   if (!isInventoryIntent(userGoal)) return false;
@@ -574,6 +634,7 @@ const isFinalizableListingAction = (action: ReActStep["actions"][number], userGo
   if (isMutatingCall(args, action.toolName) || isHelpArgs(args)) return false;
   const actionName = typeof args.action === "string" ? args.action : "";
   const path = typeof args.path === "string" ? args.path.trim() : "";
+  if (isSkillInventoryIntent(userGoal)) return isFinalizableSkillListingAction(args, actionName);
   if (LISTING_ACTIONS.has(actionName)) return true;
   if (actionName === "ls" && path && path !== "/") return true;
   if (actionName === "list" && /笔记本|notebook/i.test(runtimeUserIntent(userGoal))) return true;
@@ -593,6 +654,7 @@ const hasSuccessfulListingResult = (toolResults: McpToolCall[], userGoal: string
     if (result.status !== "success") return false;
     const args = parseArgumentSummary(result.argumentsSummary || "{}");
     const actionName = typeof args.action === "string" ? args.action : "";
+    if (isSkillInventoryIntent(userGoal)) return isFinalizableSkillListingAction(args, actionName);
     return actionName === "ls" || LISTING_ACTIONS.has(actionName);
   });
 
@@ -643,8 +705,23 @@ const suggestedInventoryArgs = (tool: McpTool, userGoal: string): Record<string,
   const actions = actionValuesForTool(tool).filter((action) => action !== "help");
   if (/_notebook\b|notebook/.test(toolName) && actions.includes("list")) return { action: "list" };
   if (/_fs\b|fs/.test(toolName)) {
+    if (isSkillInventoryIntent(userGoal) && actions.includes("ls")) return { action: "ls", path: "/LLM-Wiki/skills" };
     if (actions.includes("ls")) return { action: "ls", path: "/" };
     if (actions.includes("tree")) return { action: "tree", path: "/", maxDepth: 2 };
+  }
+  return undefined;
+};
+
+const normalizeSkillInventoryArgs = (
+  tool: McpTool,
+  args: Record<string, unknown>,
+  userGoal: string,
+): Record<string, unknown> | undefined => {
+  if (!isSkillInventoryIntent(userGoal) || !/_fs\b|fs/i.test(tool.llmName)) return undefined;
+  const actionName = typeof args.action === "string" ? args.action : "";
+  const path = typeof args.path === "string" ? args.path.trim() : "";
+  if ((actionName === "ls" || actionName === "tree") && isWorkspaceRootListingPath(path || "/")) {
+    return { action: "ls", path: "/LLM-Wiki/skills" };
   }
   return undefined;
 };
@@ -657,6 +734,10 @@ const normalizeInitialToolArgs = (
 ): Record<string, unknown> => {
   const suggestion = suggestedInventoryArgs(tool, userGoal);
   if (suggestion && (Object.keys(args).length === 0 || isHelpArgs(args))) return suggestion;
+  const skillInventoryArgs = normalizeSkillInventoryArgs(tool, args, userGoal);
+  if (skillInventoryArgs) return skillInventoryArgs;
+  const autoIngestWriteArgs = normalizeAutoIngestWriteArgs(tool, args, userGoal);
+  if (autoIngestWriteArgs) return autoIngestWriteArgs;
   return shouldUseHelpForEmptyArgs(tool, args, helpedTools) ? { action: "help" } : args;
 };
 
@@ -783,6 +864,7 @@ const finalAnswerFromHistory = async (
       "现在禁止继续调用工具。请只基于上面的对话与 ReAct 历史给出最终回答。",
       "如果上一轮对话或 Observation 已经出现明确 path，就说明应读取哪个文档或给出当前可判断的内容。",
       "注意：notebook.list 只能证明笔记本存在和打开状态，不能证明内容可读；fs.ls \"/\" 才代表当前 MCP 文件接口可读的笔记本根。遇到 permission_denied 必须说明受限，不要写成有访问权限。",
+      "如果用户询问技能、skills 或能力清单，只看到 /LLM-Wiki 下存在 skills 目录和 children 数量不算拿到技能清单；必须基于 /LLM-Wiki/skills 的 ls/tree/search 结果回答。",
       "如果无法唯一确定，就直接说无法唯一确定，并列出最可能的候选路径；不要再次建议泛搜同一个关键词。",
     ].join("\n"),
   );
@@ -840,15 +922,7 @@ export class AgentRuntime {
 
       if (latest.toolRequests.length === 0) {
         if (requiresSuccessfulMutation(userGoal) && !hasSuccessfulMutation(toolResults)) {
-          runtimeMessages.push(
-            syntheticHistoryMessage(
-              [
-                "执行约束未满足：用户选择了 skill，并且目标包含记录/写入意图，但当前还没有任何成功的 MCP 写入类调用。",
-                "不能直接说“已记录”或“已保存”。必须继续通过 MCP 工具完成实际写入。",
-                "优先使用 fs.write / fs.replace / create 等可用写入动作；如果无法确定写入路径，先通过 MCP 读取 skill 或目录结构，再写入合适位置；如果工具无法写入，明确说明失败原因。",
-              ].join("\n"),
-            ),
-          );
+          runtimeMessages.push(syntheticHistoryMessage(mutationRequirementMessage(userGoal, "模型试图在未写入的情况下直接结束。")));
           latest = await streamChatCompletion(input.profile, runtimeMessages, {
             signal: input.signal,
             tools: input.tools,
@@ -929,6 +1003,15 @@ export class AgentRuntime {
         const guardReason =
           step.observations.find((observation) => observation.summary.startsWith(REPEAT_GUARD_PREFIX))?.summary ||
           "检测到重复工具调用。";
+        if (requiresSuccessfulMutation(userGoal) && !hasSuccessfulMutation(toolResults)) {
+          runtimeMessages.push(syntheticHistoryMessage(mutationRequirementMessage(userGoal, guardReason)));
+          latest = await streamChatCompletion(input.profile, runtimeMessages, {
+            signal: input.signal,
+            tools: input.tools,
+            onText: () => undefined,
+          });
+          continue;
+        }
         const content = finalizeAgentContent(await finalAnswerFromHistory(input.profile, runtimeMessages, input.signal, guardReason), toolResults);
         handlers.onText(content);
         return { status: "final", content, toolResults, completedRounds, reactHistory };

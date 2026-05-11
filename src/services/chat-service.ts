@@ -412,7 +412,7 @@ export class ChatService {
     const normalizedSourcePath = skill.sourcePath.replace(/\\/g, "/").toLowerCase();
     const autoIngestInstruction =
       normalizedSkillName === "auto-ingest" || normalizedSourcePath.includes("/skills/auto-ingest/")
-        ? "auto-ingest 特别约束：这个 skill 基于 SiYuan Sisyphus MCP 执行。需要摄入、整理、归档或写入知识时，必须用 MCP fs 读取完整 skill 文档，然后按其流程先写 /LLM-Wiki/raw/sources/auto-ingest/ 原始备份，再写 /LLM-Wiki/wiki/ 下的结构化文档，并用 MCP 读回验证。不要写入本地产品仓库或假设已有文件系统权限。"
+        ? "auto-ingest 特别约束：这个 skill 基于 SiYuan Sisyphus MCP 执行。需要摄入、整理、归档或写入知识时，必须用 MCP fs 读取完整 skill 文档，但落盘路径以当前 LLM-Wiki 五层结构为准，不照搬旧 Neo-OS 路径，也不要使用不存在的 /LLM-Wiki/raw/sources/auto-ingest/。写入前先基于 fs.ls/tree 选择已存在父目录；职业经历、升职、岗位、团队里程碑默认写 /LLM-Wiki/raw/experience/<slug> 原始备份和 /LLM-Wiki/wiki/experience/<slug> 结构化文档。若某个父目录不存在，应自动改用最接近的已存在 raw/wiki 子目录继续写入，不要停下来要求用户确认路径；写完必须用 MCP 读回验证。不要写入本地产品仓库或假设已有文件系统权限。"
         : "";
     return [
       `用户目标：${userGoal || "用户尚未提供具体目标，请先追问澄清。"}`,
