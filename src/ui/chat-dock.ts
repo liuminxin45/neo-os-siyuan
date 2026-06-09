@@ -414,13 +414,12 @@ export class ChatDock {
     details.addEventListener("toggle", () => {
       this.traceOpenState.set(message.id, details.open);
     });
-    const summary = createElement("summary", "siyuan-addon-react__summary", `思考过程 · ${trace.steps.length} 轮`);
+    const summary = createElement("summary", "siyuan-addon-react__summary", `工具记录 · ${trace.steps.length} 轮`);
     details.append(summary);
     const list = createElement("div", "siyuan-addon-react__steps");
     for (const step of trace.steps) {
       const item = createElement("div", "siyuan-addon-react__step");
       item.append(createElement("div", "siyuan-addon-react__round", `第 ${step.round} 轮`));
-      item.append(this.renderTraceLine("Thought", step.thought));
       for (const action of step.actions) {
         item.append(this.renderTraceLine("Action", `${action.toolName} ${action.argumentsSummary}`));
       }
@@ -468,23 +467,7 @@ export class ChatDock {
   }
 
   private copyableMessageText(message: ChatMessage): string {
-    if (message.role !== "assistant" || !message.reactTrace?.steps.length) return message.content;
-    const lines = ["思考过程"];
-    for (const step of message.reactTrace.steps) {
-      lines.push(`第 ${step.round} 轮`);
-      lines.push(`Thought：${step.thought}`);
-      for (const action of step.actions) {
-        lines.push(`Action：${action.toolName} ${action.argumentsSummary}`);
-      }
-      for (const observation of step.observations) {
-        lines.push(`Observation：${observation.summary}`);
-      }
-      lines.push("");
-    }
-    lines.push("最终回答");
-    lines.push(message.content);
-    if (message.pauseHint) lines.push("", message.pauseHint);
-    return lines.join("\n").trim();
+    return [message.content, message.pauseHint].filter(Boolean).join("\n\n").trim();
   }
 
   private async copyText(value: string): Promise<void> {
