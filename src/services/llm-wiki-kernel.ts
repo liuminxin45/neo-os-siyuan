@@ -137,6 +137,40 @@ const isDestructiveCall = (toolName: string, args: Record<string, unknown>): boo
   return DESTRUCTIVE_ACTIONS.has(action) || /(?:^|[_-])(delete|remove|rm|move|mv|rename)(?:$|[_-])/i.test(action) || /(?:^|[_-])(delete|remove|rm|move|mv|rename)(?:$|[_-])/i.test(toolName);
 };
 
+const normalizePolicyToken = (value: string): string =>
+  value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "");
+
+const toolServerName = (tool: McpTool): string => {
+  const suffix = `_${tool.name}`;
+  return tool.llmName.endsWith(suffix) ? tool.llmName.slice(0, -suffix.length) : tool.llmName.split("_")[0] || "";
+};
+
+const SIYUAN_TOOL_ALIASES = ["siyuan", "sisyphus", "siyuansisyphus", "siyuanaddon"];
+
+const toolPolicyCandidates = (tool: McpTool): string[] => {
+  const serverName = toolServerName(tool);
+  return [
+    tool.serverId,
+    tool.name,
+    tool.llmName,
+    serverName,
+    ...(/siyuan|sisyphus/i.test(`${tool.serverId} ${serverName} ${tool.llmName}`) ? SIYUAN_TOOL_ALIASES : []),
+  ].filter((item) => item.trim().length > 0);
+};
+
+const policyListMatches = (allowlist: string[], candidates: string[]): boolean => {
+  if (allowlist.length === 0) return true;
+  const normalizedCandidates = candidates.map(normalizePolicyToken).filter(Boolean);
+  return allowlist.some((entry) => {
+    const normalizedEntry = normalizePolicyToken(entry);
+    if (!normalizedEntry) return false;
+    return normalizedCandidates.some((candidate) => candidate === normalizedEntry);
+  });
+};
+
 const targetFromArgs = (args: Record<string, unknown>): string => {
   const candidates = ["path", "from", "to", "targetPath", "id", "blockID", "blockId", "docId"];
   return candidates.map((key) => args[key]).find((value): value is string => typeof value === "string" && value.trim().length > 0) || "";
@@ -273,10 +307,9 @@ class McpToolPolicy {
   filterTools(tools: McpTool[], settings: LlmWikiSettings): McpTool[] {
     if (!settings.enabled) return tools;
     return tools.filter((tool) => {
-      const serverAllowed =
-        settings.allowedMcpServerIds.length === 0 || settings.allowedMcpServerIds.includes(tool.serverId);
-      const toolAllowed =
-        settings.toolAllowlist.length === 0 || settings.toolAllowlist.includes(tool.llmName) || settings.toolAllowlist.includes(tool.name);
+      const candidates = toolPolicyCandidates(tool);
+      const serverAllowed = policyListMatches(settings.allowedMcpServerIds, [tool.serverId, toolServerName(tool), ...candidates]);
+      const toolAllowed = policyListMatches(settings.toolAllowlist, [tool.llmName, tool.name, ...candidates]);
       return serverAllowed && toolAllowed;
     });
   }

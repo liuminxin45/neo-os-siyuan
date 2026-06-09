@@ -28,8 +28,8 @@
     "zh_CN": "思源 AI 聊天"
   },
   "description": {
-    "default": "A personal side-panel AI chat with LLM profiles and trusted MCP tools.",
-    "zh_CN": "个人使用的侧边 AI 聊天插件，支持 LLM 配置和可信 MCP 工具。"
+    "default": "A personal AI LLM-Wiki for Siyuan with ReAct agents, MCP tools, and custom skills.",
+    "zh_CN": "基于 AI 的个人 LLM-Wiki 思源插件，支持 ReAct 智能体、MCP 工具调用和自定义 Skills。"
   },
   "readme": {
     "default": "README.md",

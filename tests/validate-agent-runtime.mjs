@@ -27,7 +27,7 @@ const checks = [
   ["react history continuation", "src/models/agent.ts", "reactHistory"],
   ["continuation state", "src/services/chat-service.ts", "waiting-continue"],
   ["continue button", "src/ui/chat-dock.ts", "继续"],
-  ["react trace UI", "src/ui/chat-dock.ts", "思考过程"],
+  ["react trace UI", "src/ui/chat-dock.ts", "工具记录"],
   ["pause hint", "src/models/agent.ts", "已超过默认思考最大轮次"],
   ["settings default", "src/models/settings.ts", "agentMode: \"react\""],
   ["memory setting type", "src/models/settings.ts", "MaxMemoryTurns = 5 | 10 | 20 | 30"],
