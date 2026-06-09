@@ -8,18 +8,6 @@
 |---|---|---|
 | ![LLM-Wiki 设置](./PixPin_2026-06-09_09-05-47.png) | ![Skill 面板](./PixPin_2026-06-09_09-41-40.png) | ![知识问答与工具调用](./PixPin_2026-06-09_09-45-46.png) |
 
-## GitHub 描述建议
-
-推荐使用：
-
-> 个人 LLM-Wiki for SiYuan：在思源中用 ReAct Agent、MCP/Sisyphus 与自定义 Skills 查询、蒸馏、维护知识库。
-
-备选：
-
-- 基于 AI 的个人 LLM-Wiki 思源插件，支持 ReAct 智能体、MCP 工具调用和自定义 Skills。
-- 把思源笔记变成可查询、可蒸馏、可维护的个人 LLM-Wiki，支持 Sisyphus MCP 与多轮工具调用。
-- 面向个人知识管理的思源 AI 工作台：连接 LLM、Skills 和 MCP 工具，沉淀可追溯知识。
-
 ## 这个插件是什么
 
 Siyuan Addon 不是单纯的侧边聊天窗口，而是一个作用于思源笔记的个人 LLM-Wiki 工作台。它把你的思源笔记本当作可读、可写、可审计的知识库，让 AI 能在受控边界内读取资料、沉淀结论、执行自定义工作流，并把结果落回思源。
