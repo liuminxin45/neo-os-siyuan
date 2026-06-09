@@ -28,8 +28,8 @@
     "zh_CN": "思源 AI 聊天"
   },
   "description": {
-    "default": "A personal AI LLM-Wiki for Siyuan with ReAct agents, MCP tools, and custom skills.",
-    "zh_CN": "基于 AI 的个人 LLM-Wiki 思源插件，支持 ReAct 智能体、MCP 工具调用和自定义 Skills。"
+    "default": "Personal LLM-Wiki for SiYuan with ReAct agents, custom skills, and optional Sisyphus MCP tools.",
+    "zh_CN": "个人 LLM-Wiki for SiYuan：用 ReAct Agent、MCP/Sisyphus 与自定义 Skills 维护知识库。"
   },
   "readme": {
     "default": "README.md",
