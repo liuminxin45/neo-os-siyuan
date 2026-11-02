@@ -4,6 +4,14 @@
 
 项目也称 Siyuan Addon / LLM-Wiki。它把思源笔记本作为知识库，在侧边栏提供对话入口，通过 MCP 工具读取和更新笔记，并用自定义工作流组织资料整理。下文会介绍知识库结构、模型配置与写入边界。
 
+neo-os-siyuan, also called Siyuan Addon / LLM-Wiki, connects AI conversations, MCP tools, and custom workflows to a SiYuan knowledge notebook with traceable note changes.
+
+## 使用前需要什么
+
+适合愿意以思源笔记组织原始资料、结构化知识和执行记录的用户。先配置模型，再启用实际需要的 MCP 工具，并从一个权限明确的笔记本开始。
+
+查询和写入能力取决于启用工具的真实权限。笔记保存在本地，不代表外部模型也在离线处理；调用模型前应了解相应服务的数据与费用政策。
+
 ## 示例
 
 | LLM-Wiki 设置 | Skill 面板 | 知识问答与工具调用 |
