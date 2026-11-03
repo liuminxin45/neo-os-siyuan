@@ -1,5 +1,7 @@
 # neo-os-siyuan · 思源 AI 知识库插件
 
+<img src="icon.png" width="160" alt="neo-os-siyuan logo" />
+
 在思源笔记中用 AI 查询资料、整理知识，并把结论写回可追溯的个人知识库。
 
 项目也称 Siyuan Addon / LLM-Wiki。它把思源笔记本作为知识库，在侧边栏提供对话入口，通过 MCP 工具读取和更新笔记，并用自定义工作流组织资料整理。下文会介绍知识库结构、模型配置与写入边界。
